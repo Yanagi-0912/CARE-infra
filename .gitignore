@@ -1,0 +1,2 @@
+# Kubernetes local secrets (never commit real keys)
+k8s/secret.local.yaml
