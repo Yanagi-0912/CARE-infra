@@ -6,7 +6,8 @@ metadata:
 data:
   MODEL_NAME: "gemini-2.5-flash"
   EMBEDDING_MODEL: "gemini-embedding-001"
-  LIFF_URL: "https://liff.line.me/2009177739-JJrPzjAn"
+  # 請在部署時以實際 LIFF URL 取代下列值（可透過 kustomize overlay 或 CI 注入）
+  LIFF_URL: "REPLACE_WITH_LIFF_URL"
   MONGODB_DB: "CARE_database"
   MONGODB_COLLECTION: "health_articles_chunks"
   MONGODB_VECTOR_INDEX: "vector_index"
@@ -14,4 +15,5 @@ data:
   MONGODB_TEXT_FIELD: "text"
   MONGODB_VECTOR_DIM: "3072"
   MEDIA_PARSE_WEBHOOK_URL: "media_parse_webhook_url_here"
-  CORS_ALLOW_ORIGINS: "http://140.121.196.16"
+  # 請在不同環境中替換允許的 origin，避免使用通配符 *
+  CORS_ALLOW_ORIGINS: "REPLACE_WITH_ALLOWED_ORIGIN"

@@ -1,2 +1,7 @@
-# Kubernetes local secrets (never commit real keys)
+# Ignore local secrets and environment files
+k8s/secret.local.yaml
+.env
+# IDE/editor
+.vscode/
+.idea/# Kubernetes local secrets (never commit real keys)
 k8s/secret.local.yaml

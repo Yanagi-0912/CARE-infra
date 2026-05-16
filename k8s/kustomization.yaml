@@ -16,8 +16,5 @@ resources:
   - ingress.yaml
 images:
   - name: yanagi0912/care-backend
-    newTag: 0.1.0
   - name: yanagi0912/care-frontend
-    newTag: 0.1.0
   - name: n8nio/n8n
-    newTag: latest

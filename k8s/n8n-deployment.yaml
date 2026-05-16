@@ -30,11 +30,12 @@ spec:
             - name: N8N_PROTOCOL
               value: http
             - name: N8N_HOST
-              value: 140.121.196.16
+              # 請在 overlay 或 CI 以 kustomize/環境變數替換為實際的 ingress host
+              value: REPLACE_WITH_INGRESS_HOST
             - name: N8N_EDITOR_BASE_URL
-              value: http://140.121.196.16/n8n/
+              value: http://REPLACE_WITH_INGRESS_HOST/n8n/
             - name: WEBHOOK_URL
-              value: http://140.121.196.16/n8n/
+              value: http://REPLACE_WITH_INGRESS_HOST/n8n/
             - name: GENERIC_TIMEZONE
               value: Asia/Taipei
             - name: N8N_SECURE_COOKIE

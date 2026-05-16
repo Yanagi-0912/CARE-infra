@@ -1,156 +1,76 @@
-# CARE-infra
+**Overview**
+- **專案**: CARE-infra，包含 Kubernetes 部署與 GitHub Actions CI/CD。此目錄管理整個應用的叢集設定與部署流程。
+- **主要內容**: k8s 目錄存放所有 Kubernetes 資源，CI 流程位於 [.github/workflows/cicd.yml](.github/workflows/cicd.yml#L1)。
 
-CARE 的 **Kubernetes** 與 **NGINX Ingress Controller**（[ingress-nginx](https://github.com/kubernetes/ingress-nginx)）部署資源，與應用程式碼分開維護。
+**Prerequisites**
+- **本機需求**: 安裝 `kubectl`、`kustomize`、`docker`（若要在本機建置映像）。
+- **Cluster**: 取得有效的 kubeconfig 並設定為將要部署的叢集。
+- **CI Secrets**: 在 GitHub repository secrets 中設定：`DOCKERHUB_USERNAME`、`DOCKERHUB_TOKEN`、`KUBE_CONFIG_DATA`、以及所有應用所需的金鑰（例如 `GEMINI_API_KEY`, `MONGODB_URI`, `LINE_*`, `LIFF_*`）。
 
-## 目錄
+**CI/CD 流程（摘要）**
+- **檔案**: [.github/workflows/cicd.yml](.github/workflows/cicd.yml#L1)
+- **觸發條件**: push 到 `main` 或 `feature/*` 分支、pull request 到 `main`、或手動 `workflow_dispatch`。
+- **Tag 產生**: `generate-tag` 工作會以 `run_number-short_sha` 或 `workflow_dispatch` 提供的 `custom_tag` 產生映像標籤。
+- **建置與推送**: `build-backend` 與 `build-frontend` 使用 `docker/build-push-action` 將映像推到 Docker Hub，標籤包含產生的 tag 與 `latest`。
+- **驗證**: `validate` 會用 `kustomize build` 與 `kubectl apply --dry-run=client` 驗證 k8s 資源的組合。
+- **部署**: `deploy` 取得 kubeconfig，建立或更新 Secret（使用 CI secrets），更新 kustomize 的 images，最後 `kubectl apply -k k8s` 並等待 deployments rollout 完成。
 
-- `k8s/`：Namespace、ConfigMap、Secret、前後端與 n8n 的 Deployment／Service／PVC、Ingress、Kustomize base
-- `.github/workflows/`：Kubernetes manifest 驗證與部署流程
+**Kubernetes 目錄結構**
+- **kustomization**: [k8s/kustomization.yaml](k8s/kustomization.yaml#L1)（定義 namespace、resources 與 images 佈署替換）
+- **Namespace**: [k8s/namespace.yaml](k8s/namespace.yaml#L1)
+- **Secrets**: [k8s/secret.yaml](k8s/secret.yaml#L1)（範本，請勿放真實金鑰）；本地測試用的 `secret.local.yaml` 可供參考。
+- **ConfigMap**: [k8s/configmap.yaml](k8s/configmap.yaml#L1)（後端設定）與 [k8s/n8n-configmap.yaml](k8s/n8n-configmap.yaml#L1)
+- **Backend**: [k8s/backend-deployment.yaml](k8s/backend-deployment.yaml#L1) 與 [k8s/backend-service.yaml](k8s/backend-service.yaml#L1)
+- **Frontend**: [k8s/frontend-deployment.yaml](k8s/frontend-deployment.yaml#L1) 與 [k8s/frontend-service.yaml](k8s/frontend-service.yaml#L1)
+- **n8n**: PVC、Deployment、Service 與 ConfigMap（[k8s/n8n-pvc.yaml](k8s/n8n-pvc.yaml#L1), [k8s/n8n-deployment.yaml](k8s/n8n-deployment.yaml#L1), [k8s/n8n-service.yaml](k8s/n8n-service.yaml#L1)）
+- **Ingress**: [k8s/ingress.yaml](k8s/ingress.yaml#L1)（路由 `/` → 前端、`/api` → 後端、`/n8n` → n8n）
 
-## 前置需求
-
-- `kubectl` 已設定並可連到目標叢集
-- 已安裝 [Helm](https://helm.sh/)
-
-## k3s 初始化建議（Ubuntu VM）
-
-若目標是單機 VM 的 k3s，建議先安裝 k3s 並停用內建 Traefik，避免與 ingress-nginx 重複：
-
-```bash
-curl -sfL https://get.k3s.io | sh -s - --disable traefik
-sudo kubectl get nodes
+**本機驗證與部署步驟**
+- 1) 在 `CARE-infra/k8s` 目錄執行 `kustomize build . > ../rendered.yaml`。
+- 2) 驗證：
 ```
-
-若你需要讓 GitHub Actions 連進 k3s，先匯出 kubeconfig 並 base64 後放入 repo secret：
-
-```bash
-sudo cat /etc/rancher/k3s/k3s.yaml > ~/.kube/config
-chmod 600 ~/.kube/config
-base64 -w 0 ~/.kube/config
+kubectl apply --dry-run=client --validate=false -f ../rendered.yaml
 ```
-
-將輸出字串設定到 GitHub Secret：`KUBE_CONFIG_DATA`。
-
-## Kubernetes：以 Helm 安裝 NGINX Ingress
-
-以下流程為「ingress-nginx 當 Ingress Controller，由 `k8s/` 控制路由」的最小可用版本。請在**本 repo 根目錄**執行。
-
-1) 套用整包資源：
-
-```bash
+- 3) 若一切正常，將 kubeconfig 設定好後套用：
+```
 kubectl apply -k k8s
 ```
-
-2) 若要分開處理，也可以先套 namespace，再套 Kustomize：
-
-```bash
-kubectl apply -f k8s/namespace.yaml
-kubectl apply -k k8s
+- 4) 等待 rollout：
+```
+kubectl rollout status deployment/care-backend -n care-dev --timeout=5m
+kubectl rollout status deployment/care-frontend -n care-dev --timeout=5m
+kubectl rollout status deployment/care-n8n -n care-dev --timeout=5m
 ```
 
-3) 套用 Secret 前，請先改為佔位符以外的真值，或改用本機／CI 注入，勿將含真值的檔案提交 git：
+**注意事項與安全**
+- **Secret 管理**: `k8s/secret.yaml` 僅為範本。請使用 CI secrets 或 `kubectl create secret generic ... --from-literal` 在部署時注入真實值，避免將敏感資訊提交至 Git。
+- **映像標籤管理**: CI 會同時推 `latest` 與帶 tag 的 image，生產環境應以明確 tag 為主以避免不可預期的變更。
+- **n8n 資料持久化**: n8n 使用 PVC（local-path storage class）。請確認 cluster 有相對應的 StorageClass 或調整為合適的 storage class。
+- **CORS / 外部 URL**: ConfigMap 中 `CORS_ALLOW_ORIGINS` 與 `LIFF_URL` 需要根據實際域名或 IP 調整。
 
-```bash
-kubectl apply -f k8s/secret.yaml
+**快速檢查清單**
+- **CI secrets** 已設定。
+- **kubeconfig** 可使用且具有適當權限。
+- **kustomize build** 通過本地 dry-run。
+- **StorageClass** 支援 `n8n` 的 PVC。
+
+若要我把 README 提交到 git（commit & push），或補充更詳細的操作教學（例如本機模擬、debug tips），請告訴我。
+
+**改動紀錄 (本次重構)**
+- 若本機存在 `k8s/secret.local.yaml`，請移出 repo 並加入 `.gitignore`，避免未來意外提交本機敏感資訊。
+- 移除 `kustomization.yaml` 中的靜態 `newTag`，改以僅保留映像名稱（CI 使用 `kustomize edit set image` 注入 tag）。
+- 將 `n8n-deployment.yaml` 與 `configmap.yaml` 中的硬編碼 IP/URL 改為占位符（`REPLACE_WITH_...`），並加上註解，建議透過 overlay 或 CI 注入真值。
+
+**建議的下一步（敏感資訊清理）**
+- 若想從 Git 歷史中移除已提交的機敏資料，請使用 `git filter-repo` 或 `BFG Repo-Cleaner` 清除，範例（在本機備份後執行）：
+```
+# 使用 BFG 清除包含 secret.local.yaml 的歷史
+bfg --delete-files secret.local.yaml
+git reflog expire --expire=now --all && git gc --prune=now --aggressive
+```
+或使用 `git filter-repo`（更精細）：
+```
+git filter-repo --invert-paths --paths k8s/secret.local.yaml
 ```
 
-### image tag 建議
-
-- 後端與前端建議在各自的應用程式 repo 內，以 commit SHA 當 image tag，例如 `jamessu0530/care-backend:${GITHUB_SHA}`。
-- 這個 infra repo 的 [k8s/kustomization.yaml](k8s/kustomization.yaml) 只負責定義預設 tag，CI/CD 要部署新版本時，先在 workflow 裡用 `kustomize edit set image` 改成當次要發布的 tag，再 `kubectl apply -k k8s`。
-- n8n 目前先用 `latest` 當範本值，正式環境建議也改成固定版本。
-
-### GitHub Actions
-
-- `pull_request`：只做 manifest render 與 dry-run 驗證。
-- `push` 到 `main`：套用 `k8s/` 到目標叢集。
-- `workflow_dispatch`：可手動指定 `backend_image_tag`、`frontend_image_tag`、`n8n_image_tag`。
-
-### GitHub Secrets / Variables
-
-| 類型 | 名稱 | 用途 |
-| --- | --- | --- |
-| Secret | `KUBE_CONFIG_DATA` | base64 編碼 kubeconfig，讓 GitHub Actions 連到 k3s / Kubernetes |
-| Variable | `BACKEND_IMAGE_TAG` | 後端預設發布 tag |
-| Variable | `FRONTEND_IMAGE_TAG` | 前端預設發布 tag |
-| Variable | `N8N_IMAGE_TAG` | n8n 預設發布 tag |
-
-### 本機測試順序
-
-```bash
-kubectl apply -k k8s
-kubectl get pods -n care-dev
-kubectl get ingress -n care-dev
-```
-
-### 說明
-
-- 路由由 Kubernetes `Ingress`（`k8s/ingress.yaml`）管理；`ingressClassName` 為 `nginx`（對應 ingress-nginx 預設 IngressClass）。
-- 預設 namespace 為 `care-dev`。
-- 若叢集內曾安裝 Kong，請先依原安裝方式卸載（例如 `helm uninstall kong -n kong`）並刪除舊 IngressClass，避免與新 Ingress 混淆。
-
-### 入口路徑
-
-| 路徑 | 服務 |
-| --- | --- |
-| `/` | `care-frontend:80` |
-| `/api` | `care-backend:8000` |
-| `/n8n` | `n8n-service:8100` |
-
-### Kubernetes Service Port
-
-| Service | Port | targetPort |
-| --- | ---: | ---: |
-| `care-frontend` | 80 | 80 |
-| `care-backend` | 8000 | 8000 |
-| `n8n-service` | 8100 | 8100 |
-
-### ingress-nginx 安裝
-
-加入 ingress-nginx Helm repo 並更新：
-
-```bash
-helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
-helm repo update
-```
-
-安裝 ingress-nginx（範例 namespace：`ingress-nginx`）：
-
-```bash
-helm upgrade --install ingress-nginx ingress-nginx/ingress-nginx \
-  --namespace ingress-nginx \
-  --create-namespace
-```
-
-若是純 VM 的 k3s（無雲端 LoadBalancer），可改用 NodePort：
-
-```bash
-helm upgrade --install ingress-nginx ingress-nginx/ingress-nginx \
-  --namespace ingress-nginx \
-  --create-namespace \
-  --set controller.service.type=NodePort
-```
-
-若需自訂（例如 `controller.service.type`），可另建 values 檔並加上 `-f your-values.yaml`。
-
-確認 ingress-nginx 與服務：
-
-```bash
-kubectl get pods -n ingress-nginx
-kubectl get svc -n ingress-nginx
-kubectl get svc -n care-dev
-```
-
-### 測試
-
-將 `<NGINX_LB_IP>` 換成 `kubectl get svc -n ingress-nginx` 中 `ingress-nginx-controller` 的 EXTERNAL-IP，或本機／雲上對應的入口位址：
-
-```bash
-curl http://<NGINX_LB_IP>/api
-curl http://<NGINX_LB_IP>/n8n
-curl http://<NGINX_LB_IP>/
-```
-
-## 本機 Secret（可選）
-
-若要在本機用檔案覆寫而不改 git 內的 `secret.yaml`，可建立 `k8s/secret.local.yaml`（已列入 `.gitignore`），再以 `kubectl apply -f k8s/secret.local.yaml` 套用。
+請在執行清理歷史前務必備份 repo，並通知協作者重新 clone。
