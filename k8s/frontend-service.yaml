@@ -1,0 +1,16 @@
+# Service：提供叢集內穩定入口，將流量導到 care-frontend Pod。
+apiVersion: v1
+kind: Service
+metadata:
+  name: care-frontend
+  namespace: care-dev
+  labels:
+    app: care-frontend
+spec:
+  type: ClusterIP
+  selector:
+    app: care-frontend
+  ports:
+    - name: http
+      port: 80
+      targetPort: 80

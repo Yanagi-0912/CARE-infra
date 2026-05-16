@@ -1,17 +1,32 @@
-# Ingress：由 NGINX Ingress Controller 解析規則，轉發到 care-backend Service。
+# Ingress：由 NGINX Ingress Controller 解析規則，將 / 轉發到前端、/api 轉發到後端、/n8n 轉發到 n8n。
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: care-backend
+  name: care-app
+  namespace: care-dev
 spec:
   ingressClassName: nginx
   rules:
     - http:
         paths:
-          - path: /
+          - path: /n8n
+            pathType: Prefix
+            backend:
+              service:
+                name: n8n-service
+                port:
+                  number: 8100
+          - path: /api
             pathType: Prefix
             backend:
               service:
                 name: care-backend
                 port:
                   number: 8000
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: care-frontend
+                port:
+                  number: 80

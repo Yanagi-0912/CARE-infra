@@ -1,0 +1,60 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: care-n8n
+  namespace: care-dev
+  labels:
+    app: n8n
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: n8n
+  template:
+    metadata:
+      labels:
+        app: n8n
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: n8n
+          image: n8nio/n8n:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8100
+          env:
+            - name: N8N_PORT
+              value: "8100"
+            - name: N8N_PATH
+              value: /n8n/
+            - name: N8N_PROTOCOL
+              value: http
+            - name: N8N_HOST
+              value: 140.121.196.16
+            - name: N8N_EDITOR_BASE_URL
+              value: http://140.121.196.16/n8n/
+            - name: WEBHOOK_URL
+              value: http://140.121.196.16/n8n/
+            - name: GENERIC_TIMEZONE
+              value: Asia/Taipei
+            - name: N8N_SECURE_COOKIE
+              value: "false"
+          volumeMounts:
+            - name: n8n-data
+              mountPath: /home/node/.n8n
+          envFrom:
+            - configMapRef:
+                name: n8n-config
+          resources:
+            requests:
+              cpu: 500m
+              memory: 512Mi
+              ephemeral-storage: 512Mi
+            limits:
+              cpu: 1000m
+              memory: 1Gi
+              ephemeral-storage: 1Gi
+      volumes:
+        - name: n8n-data
+          persistentVolumeClaim:
+            claimName: n8n-data

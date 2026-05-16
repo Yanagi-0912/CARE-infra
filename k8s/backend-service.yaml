@@ -3,17 +3,14 @@ apiVersion: v1
 kind: Service
 metadata:
   name: care-backend
+  namespace: care-dev
   labels:
     app: care-backend
 spec:
-  # ClusterIP 代表只在 Kubernetes 叢集內可存取。
   type: ClusterIP
   selector:
-    # 依 label 找到對應 Pod（要和 Deployment template.labels 一致）。
     app: care-backend
   ports:
     - name: http
-      # Service 對外（叢集內）提供的埠號。
       port: 8000
-      # 實際轉發到容器的埠號。
       targetPort: 8000

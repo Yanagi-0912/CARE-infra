@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: care-backend-config
+  namespace: care-dev
+data:
+  MODEL_NAME: "gemini-2.5-flash"
+  EMBEDDING_MODEL: "gemini-embedding-001"
+  LIFF_URL: "https://liff.line.me/2009177739-JJrPzjAn"
+  MONGODB_DB: "CARE_database"
+  MONGODB_COLLECTION: "health_articles_chunks"
+  MONGODB_VECTOR_INDEX: "vector_index"
+  MONGODB_VECTOR_FIELD: "embedding"
+  MONGODB_TEXT_FIELD: "text"
+  MONGODB_VECTOR_DIM: "3072"
+  MEDIA_PARSE_WEBHOOK_URL: "media_parse_webhook_url_here"
+  CORS_ALLOW_ORIGINS: "http://140.121.196.16"

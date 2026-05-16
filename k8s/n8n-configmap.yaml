@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: n8n-config
+  namespace: care-dev
+data:
+  # local_asr (Whisper) 設定
+  WHISPER_MODEL: "small"
+  WHISPER_COMPUTE_TYPE: "int8"
+  # local_parser 設定
+  PARSER_MAX_FILE_SIZE_MB: "20"

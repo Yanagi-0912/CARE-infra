@@ -1,0 +1,34 @@
+# Deployment：負責建立並維持 React LIFF 前端的 Pod 數量與版本。
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: care-frontend
+  namespace: care-dev
+  labels:
+    app: care-frontend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: care-frontend
+  template:
+    metadata:
+      labels:
+        app: care-frontend
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: care-frontend
+          image: yanagi0912/care-frontend:0.1.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 80
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+              ephemeral-storage: 256Mi
+            limits:
+              cpu: 300m
+              memory: 256Mi
+              ephemeral-storage: 512Mi
