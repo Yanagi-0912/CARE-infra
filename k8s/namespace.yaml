@@ -1,4 +1,10 @@
+# Namespace 資源定義
+# 命名空間的用途：
+#   - 隔離資源：不同命名空間中的資源不會互相衝突
+#   - 權限控制：可以為不同命名空間設定不同的權限
+#   - 資源配額：可以為命名空間限制 CPU、記憶體等資源使用量
+
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: care-dev
+  name: care-dev  # 命名空間名稱，所有資源都會部署到這裡

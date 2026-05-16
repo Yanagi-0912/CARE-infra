@@ -1,3 +1,25 @@
+# PersistentVolumeClaim：請求持久化儲存
+#
+# PVC 的作用：
+#   1. Pod 重啟時資料不會遺失（Pod 內的臨時儲存會被清空）
+#   2. 跨 Pod 共享資料
+#   3. 與實際儲存設備解耦
+#
+# 儲存類別（storageClassName）：
+#   - local-path：簡單的本機儲存（適合開發/小規模部署）
+#   - nfs：網路檔案系統（適合多節點叢集）
+#   - ceph, ebs, azuredisk：企業級儲存（需要額外配置）
+#
+# 修改指南：
+#   - storage: 10Gi 表示申請 10 GB 儲存空間，根據實際需求調整
+#   - storageClassName：改為叢集中實際可用的 storage class
+#     檢查命令：kubectl get storageclass
+#
+# 如果部署時出現 "no persistent volumes available"，需要：
+#   1. 檢查 storage class 是否存在
+#   2. 確認 worker node 有足夠的磁碟空間
+#   3. 考慮使用 rancher local-path-provisioner 或其他動態供應器
+
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -7,8 +29,13 @@ metadata:
     app: n8n
 spec:
   accessModes:
-    - ReadWriteOnce
+    - ReadWriteOnce  # 一次只能被一個 Node 讀寫（n8n 不需要多個 Pod 併發寫入）
+  
+  # storageClassName 必須與叢集中的 StorageClass 名稱相符
+  # 本機 K8s（minikube, docker-desktop）通常有 "local-path" 或 "standard"
+  # 修改為你的叢集中實際可用的 storage class
   storageClassName: local-path
+  
   resources:
     requests:
-      storage: 10Gi
+      storage: 10Gi  # 申請 10 GB 儲存空間，根據 n8n 工作流程數量調整

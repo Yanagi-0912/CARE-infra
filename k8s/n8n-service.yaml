@@ -1,3 +1,9 @@
+# Service：暴露 n8n 應用
+#
+# n8n Service 的特點：
+#   - 埠 8100：n8n 預設埠
+#   - 透過 Ingress 的 /n8n 路徑暴露到外部
+
 apiVersion: v1
 kind: Service
 metadata:
@@ -11,5 +17,5 @@ spec:
     app: n8n
   ports:
     - name: http
-      port: 8100
-      targetPort: 8100
+      port: 8100        # 叢集內透過 n8n-service:8100 訪問
+      targetPort: 8100  # 轉發到容器的 8100 埠

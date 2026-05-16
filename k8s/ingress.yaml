@@ -1,28 +1,62 @@
-# Ingress：由 NGINX Ingress Controller 解析規則，將 / 轉發到前端、/api 轉發到後端、/n8n 轉發到 n8n。
+# Ingress：將外部 HTTP/HTTPS 流量路由到叢集內的 Service
+#
+# Ingress 的作用：
+#   1. 提供單一外部入口點
+#   2. 根據路徑、主機名等規則路由流量
+#   3. 可以配置 TLS/SSL 加密
+#   4. 比 NodePort/LoadBalancer 更靈活、安全
+#
+# CARE 應用的路由規則：
+#   http://your-domain/        → care-frontend:80 （前端首頁）
+#   http://your-domain/api     → care-backend:8000 （API 端點）
+#   http://your-domain/n8n     → n8n-service:8100 （自動化工作流程）
+#
+# 前置要求：
+#   - 叢集必須安裝 Ingress Controller（通常是 nginx-ingress 或 traefik）
+#   - 檢查命令：kubectl get ingressclass
+#   - 如果沒有，需要安裝：https://kubernetes.github.io/ingress-nginx/deploy/
+#
+# 修改指南：
+#   - ingressClassName：改為你叢集中實際的 Ingress Controller 名稱
+#   - rules.http.paths[].path：路由規則，生產環境也可加上主機名（host:）
+
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: care-app
   namespace: care-dev
 spec:
+  # ingressClassName 指定使用哪個 Ingress Controller
+  # 常見值："nginx"、"traefik"、"haproxy"
+  # 檢查命令：kubectl get ingressclass
+  # 如果 ingressClassName 與實際不符，Ingress 會被忽略
   ingressClassName: nginx
+  
   rules:
     - http:
+        # 路由規則按順序檢查，第一個符合的會被使用
         paths:
+          # 1. n8n 的自動化工作流程平台
           - path: /n8n
-            pathType: Prefix
+            pathType: Prefix        # Prefix：以 /n8n 開頭的路徑都轉發到這裡
             backend:
               service:
                 name: n8n-service
                 port:
                   number: 8100
+          
+          # 2. 後端 API
           - path: /api
-            pathType: Prefix
+            pathType: Prefix        # /api 和 /api/* 都轉發到後端
             backend:
               service:
                 name: care-backend
                 port:
                   number: 8000
+          
+          # 3. 前端（預設路由，放在最後）
+          # 所有其他路徑都轉發到前端
+          # 前端會處理 React Router 的路由
           - path: /
             pathType: Prefix
             backend:

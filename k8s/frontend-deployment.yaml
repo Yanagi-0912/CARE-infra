@@ -1,4 +1,14 @@
-# Deployment：負責建立並維持 React LIFF 前端的 Pod 數量與版本。
+# Deployment：負責建立並維持 React LIFF 前端應用的 Pod
+#
+# 前端 Pod 與後端 Pod 的差異：
+#   - 不需要 Secret（前端需要的敏感資訊已透過構建參數注入）
+#   - 更輕量級（只需要 web server 提供 HTML/CSS/JS 靜態文件）
+#   - 通常資源消耗較少（CPU/Memory 都比後端少）
+#
+# 修改指南：
+#   - replicas：增加前端副本數以支持更多併發用戶
+#   - containerPort：改為 80 是因為前端是靜態網站，使用標準 HTTP 埠
+
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -7,7 +17,7 @@ metadata:
   labels:
     app: care-frontend
 spec:
-  replicas: 1
+  replicas: 1  # 前端 Pod 副本數
   selector:
     matchLabels:
       app: care-frontend
@@ -19,14 +29,22 @@ spec:
       automountServiceAccountToken: false
       containers:
         - name: care-frontend
+          
+          # 前端映像：React 應用透過 Nginx 或 HTTP server 提供
+          # 修改為你的 Docker Hub 帳號 (例如: your-username/care-frontend:tag)
           image: yanagi0912/care-frontend:0.1.0
+          
           imagePullPolicy: IfNotPresent
+          
+          # 前端使用標準 HTTP 埠 80
           ports:
             - containerPort: 80
+          
+          # 前端資源限制：通常比後端少
           resources:
             requests:
-              cpu: 100m
-              memory: 128Mi
+              cpu: 100m              # 前端需要的 CPU 較少
+              memory: 128Mi          # 前端需要的記憶體較少
               ephemeral-storage: 256Mi
             limits:
               cpu: 300m
