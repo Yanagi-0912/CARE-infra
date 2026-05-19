@@ -1,0 +1,6 @@
+apiVersion: v2
+name: care
+description: CARE 應用（前後端、n8n）Kubernetes 部署
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

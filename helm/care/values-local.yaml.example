@@ -1,0 +1,25 @@
+# 本機覆寫範例：複製為 values-local.yaml（已列入 .gitignore）後使用
+# helm upgrade --install care ./helm/care -n care-dev --create-namespace -f helm/care/values-local.yaml
+
+public:
+  host: "your-ip-or-domain.example.com"
+
+backend:
+  image:
+    tag: "latest"
+
+frontend:
+  image:
+    tag: "latest"
+
+secret:
+  create: true
+  data:
+    GEMINI_API_KEY: "your_gemini_api_key_here"
+    MONGODB_URI: "your_mongodb_uri_here"
+    LINE_CHANNEL_ID: "your_line_channel_id"
+    LINE_CHANNEL_SECRET: "your_line_channel_secret"
+    LINE_CHANNEL_ACCESS_TOKEN: "your_line_channel_access_token"
+    LIFF_CHANNEL_ID: "your_liff_channel_id"
+    LIFF_CHANNEL_SECRET: "your_liff_channel_secret"
+    LIFF_ID: "your_liff_id"

@@ -1,0 +1,103 @@
+# 預設 values；CI 部署時以 --set 覆寫映像 tag，Secret 由 CI 另行建立。
+
+namespace:
+  create: true
+  name: care-dev
+
+# 對外入口（Ingress / n8n webhook / CORS）
+public:
+  scheme: http
+  host: "140.121.196.16"
+
+ingress:
+  enabled: true
+  className: nginx
+
+secret:
+  # false：由 CI 或 kubectl 建立 care-backend-secret（建議）
+  create: false
+  name: care-backend-secret
+  data: {}
+
+backend:
+  name: care-backend
+  replicaCount: 1
+  image:
+    repository: yanagi0912/care-backend
+    tag: "0.1.0"
+    pullPolicy: IfNotPresent
+  service:
+    port: 8000
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+      ephemeral-storage: 512Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+      ephemeral-storage: 1Gi
+  config:
+    MODEL_NAME: "gemini-2.5-flash"
+    EMBEDDING_MODEL: "gemini-embedding-001"
+    LIFF_URL: "https://liff.line.me/2009177739-JJrPzjAn"
+    MONGODB_DB: "CARE_database"
+    MONGODB_COLLECTION: "health_articles_chunks"
+    MONGODB_VECTOR_INDEX: "vector_index"
+    MONGODB_VECTOR_FIELD: "embedding"
+    MONGODB_TEXT_FIELD: "text"
+    MONGODB_VECTOR_DIM: "3072"
+    MEDIA_PARSE_WEBHOOK_URL: "media_parse_webhook_url_here"
+    # 預設依 public.host 組出；可在此覆寫
+    CORS_ALLOW_ORIGINS: ""
+
+frontend:
+  name: care-frontend
+  replicaCount: 1
+  image:
+    repository: yanagi0912/care-frontend
+    tag: "0.1.0"
+    pullPolicy: IfNotPresent
+  service:
+    port: 80
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+      ephemeral-storage: 256Mi
+    limits:
+      cpu: 300m
+      memory: 256Mi
+      ephemeral-storage: 512Mi
+
+n8n:
+  name: care-n8n
+  replicaCount: 1
+  image:
+    repository: n8nio/n8n
+    tag: latest
+    pullPolicy: IfNotPresent
+  service:
+    port: 8100
+  port: 8100
+  path: /n8n/
+  protocol: http
+  timezone: Asia/Taipei
+  secureCookie: "false"
+  persistence:
+    enabled: true
+    storageClass: local-path
+    size: 10Gi
+  resources:
+    requests:
+      cpu: 500m
+      memory: 512Mi
+      ephemeral-storage: 512Mi
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+      ephemeral-storage: 1Gi
+  config:
+    WHISPER_MODEL: "small"
+    WHISPER_COMPUTE_TYPE: "int8"
+    PARSER_MAX_FILE_SIZE_MB: "20"

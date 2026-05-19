@@ -37,7 +37,8 @@ on:
 
 # 全局環境變數
 env:
-  K8S_DIR: k8s                              # Kubernetes 設定檔目錄
+  HELM_CHART: helm/care                     # Helm chart 路徑
+  HELM_RELEASE: care                        # Helm release 名稱
   KUBE_NAMESPACE: care-dev                  # 部署的命名空間
   BACKEND_IMAGE: yanagi0912/care-backend    # 後端映像名稱（改為你的 Docker Hub 帳號）
   FRONTEND_IMAGE: yanagi0912/care-frontend  # 前端映像名稱（改為你的 Docker Hub 帳號）
@@ -202,12 +203,11 @@ jobs:
 
   # 工作 4：驗證 Kubernetes 資源配置
   # 
-  # 目的：確保 Kubernetes 資源定義有效，早期發現配置問題
+  # 目的：確保 Helm chart 渲染結果有效，早期發現配置問題
   # 
   # 驗證步驟：
-  #   1. 使用 kustomize build 組合所有 YAML 檔案
-  #   2. 使用 kubectl apply --dry-run 進行乾跑測試（不實際建立資源）
-  #   3. 驗證資源定義的語法和邏輯
+  #   1. helm template 渲染 chart
+  #   2. kubectl apply --dry-run 進行乾跑測試（不實際建立資源）
   # 
   # 優點：
   #   - 所有分支都驗證，PR 時不會意外合併有問題的配置
@@ -225,22 +225,18 @@ jobs:
         with:
           version: latest
 
-      # 安裝 kustomize
-      - name: Set up kustomize
-        uses: imranismail/setup-kustomize@v2
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
 
-      # 驗證 Kubernetes 資源
-      - name: Validate manifests
-        working-directory: CARE-infra/k8s
+      - name: Validate Helm chart
         run: |
-          # 1. 使用 kustomize build 組合所有 YAML（包括 overlays、patches 等）
-          # 輸出到 rendered.yaml 方便檢查
-          kustomize build . > ../../rendered.yaml
-          
-          # 2. 乾跑測試：檢查 YAML 語法和結構，但不實際建立資源
-          # --dry-run=client：只在客戶端驗證，不與伺服器通信
-          # --validate=false：跳過一些嚴格驗證（用於兼容某些舊版本）
-          kubectl apply --dry-run=client --validate=false -f ../../rendered.yaml
+          helm lint "${{ env.HELM_CHART }}"
+          helm template "${{ env.HELM_RELEASE }}" "${{ env.HELM_CHART }}" \
+            --namespace "${{ env.KUBE_NAMESPACE }}" \
+            --set backend.image.tag=ci-validate \
+            --set frontend.image.tag=ci-validate \
+            > rendered.yaml
+          kubectl apply --dry-run=client --validate=false -f rendered.yaml
 
   # 工作 5：部署到 Kubernetes 叢集
   # 
@@ -252,8 +248,7 @@ jobs:
   # 部署步驟：
   #   1. 設定 kubeconfig（連接叢集）
   #   2. 建立或更新 Secret（敏感資訊）
-  #   3. 更新 Kustomize 中的映像標籤
-  #   4. 應用 Kubernetes 資源
+  #   3. helm upgrade --install 部署（--set 注入映像 tag）
   #   5. 等待 rollout 完成
   #   6. 驗證部署成功
   # 
@@ -280,8 +275,8 @@ jobs:
         with:
           version: latest
 
-      - name: Set up kustomize
-        uses: imranismail/setup-kustomize@v2
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
 
       # 設定 kubeconfig 以連接 Kubernetes 叢集
       - name: Load kubeconfig
@@ -309,22 +304,16 @@ jobs:
             --from-literal=LIFF_ID='${{ secrets.LIFF_ID }}' \
             -n care-dev --dry-run=client -o yaml | kubectl apply -f - || true
 
-      # 更新 Kustomize 中的映像標籤
-      - name: Update kustomization images
-        working-directory: CARE-infra/k8s
+      - name: Deploy with Helm
         run: |
-          # kustomize edit set image：更新 kustomization.yaml 中的映像標籤
-          # 這樣 kubectl apply -k 時會使用新的映像版本
-          kustomize edit set image \
-            ${{ env.BACKEND_IMAGE }}=${{ env.BACKEND_IMAGE }}:${{ needs.generate-tag.outputs.tag }} \
-            ${{ env.FRONTEND_IMAGE }}=${{ env.FRONTEND_IMAGE }}:${{ needs.generate-tag.outputs.tag }}
-
-      # 應用資源到叢集
-      - name: Apply manifests
-        run: |
-          # kubectl apply -k：應用 kustomize 生成的所有資源
-          # 這個命令會建立或更新所有 Kubernetes 資源
-          kubectl apply -k CARE-infra/k8s
+          helm upgrade --install "${{ env.HELM_RELEASE }}" "${{ env.HELM_CHART }}" \
+            --namespace "${{ env.KUBE_NAMESPACE }}" \
+            --create-namespace \
+            --set backend.image.repository=${{ env.BACKEND_IMAGE }} \
+            --set backend.image.tag=${{ needs.generate-tag.outputs.tag }} \
+            --set frontend.image.repository=${{ env.FRONTEND_IMAGE }} \
+            --set frontend.image.tag=${{ needs.generate-tag.outputs.tag }} \
+            --wait --timeout 10m
 
       # 等待所有 Deployment 完成滾動更新
       - name: Wait for rollouts
