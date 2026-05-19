@@ -110,11 +110,20 @@ helm upgrade --install care ./helm/care \
 
 `ingress.className` 已預設 `traefik`，通常不必再加 `--set`。
 
+## Docker Hub 映像
+
+| 服務 | 映像 |
+|------|------|
+| 後端 | `yanagi0912/care` |
+| 前端 | `yanagi0912/care-liff` |
+| n8n | `n8nio/n8n`（官方） |
+
 ## 設定檔
 
 主要可調項目在 `helm/care/values.yaml`：
 
 - `public.host` / `public.scheme`：對外 URL（n8n、CORS）
 - `ingress.className`：K3s 用 `traefik`；nginx 叢集改 `nginx`
-- `backend.*` / `frontend.*` / `n8n.*`：映像、資源、副本數
+- `backend.image.repository` / `frontend.image.repository`：上表 Docker Hub 名稱
+- `backend.*` / `frontend.*` / `n8n.*`：映像 tag、資源、副本數
 - `secret.create`：預設 `false`（由 CI／kubectl 建立 Secret）

@@ -24,7 +24,7 @@ backend:
   name: care-backend
   replicaCount: 1
   image:
-    repository: yanagi0912/care-backend
+    repository: yanagi0912/care
     tag: "0.1.0"
     pullPolicy: IfNotPresent
   service:
@@ -56,7 +56,7 @@ frontend:
   name: care-frontend
   replicaCount: 1
   image:
-    repository: yanagi0912/care-frontend
+    repository: yanagi0912/care-liff
     tag: "0.1.0"
     pullPolicy: IfNotPresent
   service:

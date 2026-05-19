@@ -40,8 +40,8 @@ env:
   HELM_CHART: helm/care                     # Helm chart 路徑
   HELM_RELEASE: care                        # Helm release 名稱
   KUBE_NAMESPACE: care-dev                  # 部署的命名空間
-  BACKEND_IMAGE: yanagi0912/care-backend    # 後端映像名稱（改為你的 Docker Hub 帳號）
-  FRONTEND_IMAGE: yanagi0912/care-frontend  # 前端映像名稱（改為你的 Docker Hub 帳號）
+  BACKEND_IMAGE: yanagi0912/care           # 後端映像（Docker Hub）
+  FRONTEND_IMAGE: yanagi0912/care-liff     # 前端映像（Docker Hub）
   N8N_IMAGE: n8nio/n8n                      # n8n 官方映像（通常不改）
 
 # GitHub Actions 權限設定
@@ -110,8 +110,8 @@ jobs:
   #   - 依賴 generate-tag 工作完成
   # 
   # 映像標籤：
-  #   - 帶 tag：yanagi0912/care-backend:123-abc1234
-  #   - latest：yanagi0912/care-backend:latest（方便快速測試，但生產環境應避免）
+  #   - 帶 tag：yanagi0912/care:123-abc1234
+  #   - latest：yanagi0912/care:latest（方便快速測試，但生產環境應避免）
   # 
   # 快取優化：
   #   - cache-from: type=gha：使用 GitHub Actions 內建快取
