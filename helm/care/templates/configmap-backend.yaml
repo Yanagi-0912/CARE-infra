@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: care-backend-config
+  namespace: {{ include "care.namespace" . }}
+  labels:
+    {{- include "care.backend.labels" . | nindent 4 }}
+data:
+  MODEL_NAME: {{ .Values.backend.config.MODEL_NAME | quote }}
+  EMBEDDING_MODEL: {{ .Values.backend.config.EMBEDDING_MODEL | quote }}
+  LIFF_URL: {{ .Values.backend.config.LIFF_URL | quote }}
+  MONGODB_DB: {{ .Values.backend.config.MONGODB_DB | quote }}
+  MONGODB_COLLECTION: {{ .Values.backend.config.MONGODB_COLLECTION | quote }}
+  MONGODB_VECTOR_INDEX: {{ .Values.backend.config.MONGODB_VECTOR_INDEX | quote }}
+  MONGODB_VECTOR_FIELD: {{ .Values.backend.config.MONGODB_VECTOR_FIELD | quote }}
+  MONGODB_TEXT_FIELD: {{ .Values.backend.config.MONGODB_TEXT_FIELD | quote }}
+  MONGODB_VECTOR_DIM: {{ .Values.backend.config.MONGODB_VECTOR_DIM | quote }}
+  MEDIA_PARSE_WEBHOOK_URL: {{ .Values.backend.config.MEDIA_PARSE_WEBHOOK_URL | quote }}
+  CORS_ALLOW_ORIGINS: {{ include "care.corsAllowOrigins" . | quote }}

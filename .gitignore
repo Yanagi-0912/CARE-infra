@@ -1,7 +1,8 @@
-# Ignore local secrets and environment files
-k8s/secret.local.yaml
+# Local secrets and environment
 .env
+helm/care/values-local.yaml
+k8s/secret.local.yaml
+
 # IDE/editor
 .vscode/
-.idea/# Kubernetes local secrets (never commit real keys)
-k8s/secret.local.yaml
+.idea/
