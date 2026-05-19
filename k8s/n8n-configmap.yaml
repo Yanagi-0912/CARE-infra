@@ -1,0 +1,29 @@
+# ConfigMap：n8n 應用的配置
+#
+# n8n 特定的環境變數，與 care-backend-config 分開管理
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: n8n-config
+  namespace: care-dev
+data:
+  # ===== 本機語音識別配置 =====
+  # 在 CARE 中用於把音頻轉換為文本
+  # WHISPER_MODEL：使用的模型大小
+  #   - tiny：最快但準確度低（約 39 MB）
+  #   - base：平衡（約 140 MB）
+  #   - small：較好準確度（約 461 MB）
+  #   - medium：高準確度（約 1.4 GB）
+  #   - large：最高準確度（約 2.9 GB）
+  WHISPER_MODEL: "small"
+  
+  # WHISPER_COMPUTE_TYPE：計算精度
+  #   - float32：最高精度，最慢，需要最多 GPU 記憶體
+  #   - float16：平衡
+  #   - int8：最快，需要最少記憶體，但精度較低
+  WHISPER_COMPUTE_TYPE: "int8"
+  
+  # ===== 文件解析配置 =====
+  # 用於處理上傳的媒體文件
+  PARSER_MAX_FILE_SIZE_MB: "20"  # 最大文件大小 20 MB

@@ -1,0 +1,86 @@
+# Deployment：負責建立並維持 FastAPI 後端應用的 Pod
+#
+# Deployment 的主要職責：
+#   1. 建立指定數量的 Pod 副本（replicas）
+#   2. 當 Pod 故障時自動重啟
+#   3. 滾動更新（Rolling Update）：逐個替換舊 Pod 為新版本
+#   4. 回滾（Rollback）：如果新版本有問題，可以快速恢復到舊版本
+#
+# 修改指南：
+#   - replicas：需要更多 Pod 時，增加這個數字
+#   - image tag：由 CI 自動更新，本機可手動改版本號
+#   - resources: 根據應用的實際需求調整 CPU/記憶體
+#   - imagePullPolicy：IfNotPresent 表示如果本機已有 image 就不重新拉取
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: care-backend
+  namespace: care-dev
+  labels:
+    app: care-backend  # 標籤，用於 Service 選取和路由
+spec:
+  replicas: 1  # Pod 副本數量。增加此值可提高可用性，但需要更多資源
+  
+  selector:
+    matchLabels:
+      app: care-backend  # 選取標籤相符的 Pod，必須與 template.metadata.labels 一致
+  
+  # template 定義了要建立的 Pod 的樣本
+  template:
+    metadata:
+      labels:
+        app: care-backend  # 每個 Pod 都會有這個標籤
+    
+    spec:
+      # 安全設定：禁用自動掛載服務帳戶令牌
+      # 除非應用需要調用 Kubernetes API，否則應該禁用以提高安全性
+      automountServiceAccountToken: false
+      
+      containers:
+        - name: care-backend
+          
+          # 映像資訊：格式為 registry/repository:tag
+          # CI 會自動更新 tag，但映像名稱保持不變
+          # 修改為你的 Docker Hub 帳號 (例如: your-username/care-backend:tag)
+          image: yanagi0912/care-backend:0.1.0
+          
+          # imagePullPolicy: 控制 Pod 何時拉取映像
+          #   - IfNotPresent：本機有就用本機的（推薦用於開發）
+          #   - Always：每次都從 registry 拉取（推薦用於生產 latest tag）
+          #   - Never：只用本機映像
+          imagePullPolicy: IfNotPresent
+          
+          # 容器暴露的埠
+          ports:
+            - containerPort: 8000  # FastAPI 預設埠
+          
+          # 資源限制和預留
+          # requests：Pod 被排程前必須保證的資源
+          # limits：Pod 最多可用的資源（超過會被殺死）
+          # 修改指南：根據應用實際需求調整
+          #   - CPU: 1 CPU = 1000m（millicores）
+          #   - Memory: 256Mi = 256 兆位元組
+          resources:
+            # 預留資源：叢集會為此 Pod 保留至少這些資源
+            requests:
+              cpu: 100m              # 預留 0.1 CPU
+              memory: 256Mi          # 預留 256 MB 記憶體
+              ephemeral-storage: 512Mi  # 預留 512 MB 臨時儲存
+            
+            # 限制資源：Pod 不能超過這些限制
+            limits:
+              cpu: 500m              # 最多使用 0.5 CPU
+              memory: 512Mi          # 最多使用 512 MB 記憶體
+              ephemeral-storage: 1Gi # 最多使用 1 GB 臨時儲存
+          
+          # 環境變數注入
+          # envFrom 會自動把 ConfigMap 和 Secret 中的所有鍵值對注入為環境變數
+          envFrom:
+            # ConfigMap：非敏感的應用配置
+            - configMapRef:
+                name: care-backend-config
+            
+            # Secret：敏感的應用配置（API keys、密碼等）
+            - secretRef:
+                name: care-backend-secret

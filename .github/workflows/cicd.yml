@@ -1,0 +1,346 @@
+# CARE App CI/CD 流程
+# 
+# 這個 GitHub Actions workflow 自動化了：
+#   1. 構建 Docker 映像（後端 & 前端）
+#   2. 將映像推到 Docker Hub
+#   3. 驗證 Kubernetes 資源配置
+#   4. 自動部署到 Kubernetes 叢集
+#
+# 觸發時機：
+#   - push 到 main 分支或 feature/* 分支：構建並驗證（不部署）
+#   - 只有 push 到 main 才會自動部署
+#   - pull_request 到 main：驗證（不構建和部署）
+#   - workflow_dispatch：手動觸發（支援自訂 tag）
+
+name: care-app-build-push-deploy
+
+# 觸發條件
+on:
+  push:
+    # 自動在 push 到這些分支時觸發
+    branches:
+      - main              # main 分支：構建 → 驗證 → 部署
+      - feature/*         # feature 分支：構建 → 驗證
+  
+  pull_request:
+    # PR 到 main 時，只進行驗證（不構建映像）
+    branches:
+      - main
+  
+  workflow_dispatch:
+    # 允許手動觸發（GitHub UI 的 Actions 頁面）
+    inputs:
+      custom_tag:
+        description: "自訂映像標籤（可選，例如：v1.0.0）"
+        required: false
+        default: ""
+
+# 全局環境變數
+env:
+  K8S_DIR: k8s                              # Kubernetes 設定檔目錄
+  KUBE_NAMESPACE: care-dev                  # 部署的命名空間
+  BACKEND_IMAGE: yanagi0912/care-backend    # 後端映像名稱（改為你的 Docker Hub 帳號）
+  FRONTEND_IMAGE: yanagi0912/care-frontend  # 前端映像名稱（改為你的 Docker Hub 帳號）
+  N8N_IMAGE: n8nio/n8n                      # n8n 官方映像（通常不改）
+
+# GitHub Actions 權限設定
+permissions:
+  contents: read  # 只需要讀取程式碼，不需要寫入權限
+
+jobs:
+  # 工作 1：生成映像標籤
+  # 
+  # 目的：根據觸發方式決定使用什麼 tag
+  # 
+  # Tag 生成邏輯：
+  #   - 手動觸發（workflow_dispatch）且提供了 custom_tag：使用自訂 tag（例如：v1.0.0）
+  #   - 其他情況（push）：使用 run_number-short_sha（例如：123-abc1234）
+  # 
+  # 好處：
+  #   - 每次推送都有唯一的 tag，可以追蹤版本歷史
+  #   - 手動部署時可以指定具體的版本
+  # 
+  # 輸出：
+  #   - tag：映像的完整標籤
+  #   - short_sha：git 短 SHA（用於快速識別）
+  
+  generate-tag:
+    runs-on: ubuntu-latest
+    # 輸出供其他工作使用
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+      short_sha: ${{ steps.tag.outputs.short_sha }}
+    steps:
+      # 檢出程式碼
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # 生成映像標籤
+      - name: Generate image tag
+        id: tag  # 步驟 ID，用於引用輸出
+        run: |
+          # 取得當前 git commit 的短 SHA（前 7 位）
+          SHORT_SHA=$(git rev-parse --short HEAD)
+          echo "short_sha=${SHORT_SHA}" >> $GITHUB_OUTPUT
+          
+          # 判斷是否手動觸發且提供了自訂 tag
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ] && [ -n "${{ github.event.inputs.custom_tag }}" ]; then
+            # 使用自訂 tag
+            TAG="${{ github.event.inputs.custom_tag }}"
+          else
+            # 使用預設 tag 格式：run_number-short_sha
+            # github.run_number：這次 workflow 執行的序號（遞增的）
+            TAG="${{ github.run_number }}-${SHORT_SHA}"
+          fi
+          
+          echo "tag=${TAG}" >> $GITHUB_OUTPUT
+          echo "Generated tag: ${TAG}"
+
+  # 工作 2：構建後端映像
+  # 
+  # 前置要求：
+  #   1. GitHub Secrets 中設定了：
+  #      - DOCKERHUB_USERNAME：Docker Hub 帳號
+  #      - DOCKERHUB_TOKEN：Docker Hub 存取令牌（或 Personal Access Token）
+  #   2. Dockerfile 位於 ./CARE 目錄
+  # 
+  # 執行時機：
+  #   - 僅在 push 或 workflow_dispatch 時執行（PR 不執行）
+  #   - 依賴 generate-tag 工作完成
+  # 
+  # 映像標籤：
+  #   - 帶 tag：yanagi0912/care-backend:123-abc1234
+  #   - latest：yanagi0912/care-backend:latest（方便快速測試，但生產環境應避免）
+  # 
+  # 快取優化：
+  #   - cache-from: type=gha：使用 GitHub Actions 內建快取
+  #   - 速度更快，減少重複構建相同的層
+
+  build-backend:
+    needs: generate-tag  # 等待 generate-tag 完成
+    runs-on: ubuntu-latest
+    # 條件：只在 push 或 workflow_dispatch 時執行（PR 時不構建映像）
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Docker Buildx：高級 Docker 構建工具，支援多平台、快取優化等
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # 登入 Docker Hub，以便推送映像
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          # ⚠️  修改說明：
+          # 在 GitHub repository settings → Secrets → Actions 中新增：
+          # DOCKERHUB_USERNAME：你的 Docker Hub 用戶名
+          # DOCKERHUB_TOKEN：你的 Docker Hub Personal Access Token（而非密碼！）
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      # 構建並推送映像
+      - name: Build and push backend
+        uses: docker/build-push-action@v5
+        with:
+          context: ./CARE              # Dockerfile 的上下文目錄
+          push: true                   # 推送到 Docker Hub
+          tags: |
+            # 兩個標籤同時推送
+            ${{ env.BACKEND_IMAGE }}:${{ needs.generate-tag.outputs.tag }}  # 帶版本號的 tag
+            ${{ env.BACKEND_IMAGE }}:latest  # latest 標籤（方便快速更新）
+          cache-from: type=gha         # 使用 GitHub Actions 快取加速構建
+          cache-to: type=gha,mode=max  # 保存快取以供下次使用
+
+  # 工作 3：構建前端映像
+  # 
+  # 與後端的差異：
+  #   - 使用 build-args 注入 React 環境變數
+  #   - VITE_LIFF_ID：LINE LIFF 應用 ID（編譯時決定，無法在運行時改變）
+  #   - VITE_API_BASE_URL：API 伺服器位址（前端需要知道後端在哪裡）
+  # 
+  # 前置要求：
+  #   - GitHub Secrets 中設定：
+  #     - VITE_LIFF_ID：LINE LIFF ID
+  #     - VITE_API_BASE_URL：後端 API URL（例如 http://example.com/api）
+  #   - ./CARE-LIFF 目錄有 Dockerfile 和 React 程式碼
+
+  build-frontend:
+    needs: generate-tag
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      # 構建並推送前端映像
+      - name: Build and push frontend
+        uses: docker/build-push-action@v5
+        with:
+          context: ./CARE-LIFF          # React 應用目錄
+          # 傳遞構建參數給 Dockerfile
+          # 這些值會在構建時注入到 React 代碼中
+          build-args: |
+            VITE_LIFF_ID=${{ secrets.VITE_LIFF_ID }}          # LINE LIFF ID
+            VITE_API_BASE_URL=${{ secrets.VITE_API_BASE_URL }} # 後端 API URL
+          push: true
+          tags: |
+            ${{ env.FRONTEND_IMAGE }}:${{ needs.generate-tag.outputs.tag }}
+            ${{ env.FRONTEND_IMAGE }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # 工作 4：驗證 Kubernetes 資源配置
+  # 
+  # 目的：確保 Kubernetes 資源定義有效，早期發現配置問題
+  # 
+  # 驗證步驟：
+  #   1. 使用 kustomize build 組合所有 YAML 檔案
+  #   2. 使用 kubectl apply --dry-run 進行乾跑測試（不實際建立資源）
+  #   3. 驗證資源定義的語法和邏輯
+  # 
+  # 優點：
+  #   - 所有分支都驗證，PR 時不會意外合併有問題的配置
+  #   - 快速反饋，開發者立即發現問題
+
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # 安裝 kubectl
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v4
+        with:
+          version: latest
+
+      # 安裝 kustomize
+      - name: Set up kustomize
+        uses: imranismail/setup-kustomize@v2
+
+      # 驗證 Kubernetes 資源
+      - name: Validate manifests
+        working-directory: CARE-infra/k8s
+        run: |
+          # 1. 使用 kustomize build 組合所有 YAML（包括 overlays、patches 等）
+          # 輸出到 rendered.yaml 方便檢查
+          kustomize build . > ../../rendered.yaml
+          
+          # 2. 乾跑測試：檢查 YAML 語法和結構，但不實際建立資源
+          # --dry-run=client：只在客戶端驗證，不與伺服器通信
+          # --validate=false：跳過一些嚴格驗證（用於兼容某些舊版本）
+          kubectl apply --dry-run=client --validate=false -f ../../rendered.yaml
+
+  # 工作 5：部署到 Kubernetes 叢集
+  # 
+  # 執行條件：
+  #   - push 到 main 分支（自動部署）
+  #   - 或手動 workflow_dispatch 觸發
+  #   - 並且所有先前的工作都成功
+  # 
+  # 部署步驟：
+  #   1. 設定 kubeconfig（連接叢集）
+  #   2. 建立或更新 Secret（敏感資訊）
+  #   3. 更新 Kustomize 中的映像標籤
+  #   4. 應用 Kubernetes 資源
+  #   5. 等待 rollout 完成
+  #   6. 驗證部署成功
+  # 
+  # 前置要求：
+  #   - GitHub Secrets 中設定了：
+  #     - KUBE_CONFIG_DATA：kubeconfig 的 base64 編碼（包含叢集位址、認證等）
+  #     - 所有敏感資訊：GEMINI_API_KEY、MONGODB_URI、LINE_*、LIFF_* 等
+
+  deploy:
+    needs:
+      - generate-tag      # 需要映像標籤
+      - build-backend     # 需要後端映像
+      - build-frontend    # 需要前端映像
+      - validate          # 需要驗證通過
+    # 只在 push main 或手動觸發時部署（不在 PR 時部署）
+    if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v4
+        with:
+          version: latest
+
+      - name: Set up kustomize
+        uses: imranismail/setup-kustomize@v2
+
+      # 設定 kubeconfig 以連接 Kubernetes 叢集
+      - name: Load kubeconfig
+        run: |
+          mkdir -p "$HOME/.kube"
+          # 解碼 base64 的 kubeconfig 並保存
+          echo '${{ secrets.KUBE_CONFIG_DATA }}' | base64 -d > "$HOME/.kube/config"
+          # 設定權限為只有所有者可讀
+          chmod 600 "$HOME/.kube/config"
+
+      # 建立或更新 Secret
+      - name: Create k8s Secret
+        run: |
+          # kubectl create secret 會自動 Base64 編碼敏感資訊
+          # --dry-run=client：不實際建立，只生成 YAML
+          # kubectl apply：如果已存在則更新，不存在則建立
+          kubectl create secret generic care-backend-secret \
+            --from-literal=GEMINI_API_KEY='${{ secrets.GEMINI_API_KEY }}' \
+            --from-literal=MONGODB_URI='${{ secrets.MONGODB_URI }}' \
+            --from-literal=LINE_CHANNEL_ID='${{ secrets.LINE_CHANNEL_ID }}' \
+            --from-literal=LINE_CHANNEL_SECRET='${{ secrets.LINE_CHANNEL_SECRET }}' \
+            --from-literal=LINE_CHANNEL_ACCESS_TOKEN='${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}' \
+            --from-literal=LIFF_CHANNEL_ID='${{ secrets.LIFF_CHANNEL_ID }}' \
+            --from-literal=LIFF_CHANNEL_SECRET='${{ secrets.LIFF_CHANNEL_SECRET }}' \
+            --from-literal=LIFF_ID='${{ secrets.LIFF_ID }}' \
+            -n care-dev --dry-run=client -o yaml | kubectl apply -f - || true
+
+      # 更新 Kustomize 中的映像標籤
+      - name: Update kustomization images
+        working-directory: CARE-infra/k8s
+        run: |
+          # kustomize edit set image：更新 kustomization.yaml 中的映像標籤
+          # 這樣 kubectl apply -k 時會使用新的映像版本
+          kustomize edit set image \
+            ${{ env.BACKEND_IMAGE }}=${{ env.BACKEND_IMAGE }}:${{ needs.generate-tag.outputs.tag }} \
+            ${{ env.FRONTEND_IMAGE }}=${{ env.FRONTEND_IMAGE }}:${{ needs.generate-tag.outputs.tag }}
+
+      # 應用資源到叢集
+      - name: Apply manifests
+        run: |
+          # kubectl apply -k：應用 kustomize 生成的所有資源
+          # 這個命令會建立或更新所有 Kubernetes 資源
+          kubectl apply -k CARE-infra/k8s
+
+      # 等待所有 Deployment 完成滾動更新
+      - name: Wait for rollouts
+        run: |
+          # kubectl rollout status：監控 Deployment 的滾動更新進度
+          # --timeout=5m：如果 5 分鐘內沒完成則失敗
+          # 防止部署卡住，確保部署及時完成
+          kubectl rollout status deployment/care-backend -n "$KUBE_NAMESPACE" --timeout=5m
+          kubectl rollout status deployment/care-frontend -n "$KUBE_NAMESPACE" --timeout=5m
+          kubectl rollout status deployment/care-n8n -n "$KUBE_NAMESPACE" --timeout=5m
+
+      # 輸出部署資訊
+      - name: Print deployment info
+        run: |
+          echo "=== Deployment Complete ==="
+          echo "Image tag: ${{ needs.generate-tag.outputs.tag }}"
+          echo "Services:"
+          # 列出所有建立的 Service，驗證部署成功
+          kubectl get svc -n "$KUBE_NAMESPACE"
