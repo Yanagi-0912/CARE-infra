@@ -11,7 +11,8 @@ public:
 
 ingress:
   enabled: true
-  className: nginx
+  # K3s 內建 Traefik；若叢集用 ingress-nginx 可改為 nginx
+  className: traefik
 
 secret:
   # false：由 CI 或 kubectl 建立 care-backend-secret（建議）

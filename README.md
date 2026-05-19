@@ -10,8 +10,19 @@ CARE 應用的 **Kubernetes** 部署與 **GitHub Actions CI/CD**，使用 **Helm
 ## 前置需求
 
 - `kubectl`、`helm`（v3）
-- 可連線的 Kubernetes 叢集
-- 叢集已安裝 [ingress-nginx](https://kubernetes.github.io/ingress-nginx/)（`ingress.className: nginx`）
+- 可連線的 Kubernetes 叢集（實踐室為 **K3s**）
+- **Ingress Controller**：K3s 已內建 **Traefik**，chart 預設 `ingress.className: traefik`（無需另裝 ingress-nginx）
+
+### K3s 與 Ingress 怎麼對應？
+
+路由仍用標準 **`networking.k8s.io/v1` 的 `Ingress`** 資源（路徑 `/`、`/api`、`/n8n` 寫法不變），差別只在 `spec.ingressClassName` 要與叢集一致：
+
+| 叢集 | `ingress.className` |
+|------|---------------------|
+| K3s（內建 Traefik） | `traefik`（預設） |
+| 自裝 ingress-nginx | `nginx` |
+
+確認指令：`kubectl get ingressclass`
 
 ## 本機部署（Helm）
 
@@ -80,10 +91,30 @@ kubectl apply --dry-run=client --validate=false -f rendered.yaml
 
 需在 GitHub Secrets 設定：`DOCKERHUB_*`、`KUBE_CONFIG_DATA`、以及各應用金鑰（見 workflow 註解）。
 
+## K3s 快速部署（實踐室主機）
+
+```bash
+# kubeconfig（若一般使用者無權限）
+export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+
+kubectl get ingressclass   # 應有 traefik
+kubectl get storageclass   # n8n 預設使用 local-path（K3s 內建）
+
+cd CARE-infra   # jamesbranch
+# 建立 Secret 後：
+helm upgrade --install care ./helm/care \
+  --namespace care-dev \
+  --create-namespace \
+  --set public.host=140.121.196.16
+```
+
+`ingress.className` 已預設 `traefik`，通常不必再加 `--set`。
+
 ## 設定檔
 
 主要可調項目在 `helm/care/values.yaml`：
 
 - `public.host` / `public.scheme`：對外 URL（n8n、CORS）
+- `ingress.className`：K3s 用 `traefik`；nginx 叢集改 `nginx`
 - `backend.*` / `frontend.*` / `n8n.*`：映像、資源、副本數
 - `secret.create`：預設 `false`（由 CI／kubectl 建立 Secret）

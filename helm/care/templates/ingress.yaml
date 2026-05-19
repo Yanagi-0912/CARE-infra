@@ -1,4 +1,5 @@
 {{- if .Values.ingress.enabled }}
+# 標準 Kubernetes Ingress；由叢集的 Ingress Controller 實作路由（K3s 預設為 Traefik）。
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
