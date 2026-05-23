@@ -206,8 +206,9 @@ jobs:
   # 目的：確保 Helm chart 渲染結果有效，早期發現配置問題
   # 
   # 驗證步驟：
-  #   1. helm template 渲染 chart
-  #   2. kubectl apply --dry-run 進行乾跑測試（不實際建立資源）
+  #   1. helm lint 檢查 chart
+  #   2. helm template 渲染 manifest
+  #   3. kubeconform 離線驗證 YAML（CI 無 Kubernetes 叢集，不需連 API）
   # 
   # 優點：
   #   - 所有分支都驗證，PR 時不會意外合併有問題的配置
@@ -218,12 +219,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      # 安裝 kubectl
-      - name: Set up kubectl
-        uses: azure/setup-kubectl@v4
-        with:
-          version: latest
 
       - name: Set up Helm
         uses: azure/setup-helm@v4
@@ -236,7 +231,9 @@ jobs:
             --set backend.image.tag=ci-validate \
             --set frontend.image.tag=ci-validate \
             > rendered.yaml
-          kubectl apply --dry-run=client --validate=false -f rendered.yaml
+          test -s rendered.yaml
+          curl -fsSL "https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz" | tar xz
+          ./kubeconform -summary -ignore-missing-schemas rendered.yaml
 
   # 工作 5：部署到 Kubernetes 叢集
   # 

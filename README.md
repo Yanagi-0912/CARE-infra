@@ -73,7 +73,7 @@ helm upgrade --install care ./helm/care -n care-dev \
 ```bash
 helm lint helm/care
 helm template care helm/care --namespace care-dev > rendered.yaml
-kubectl apply --dry-run=client --validate=false -f rendered.yaml
+kubeconform -summary -ignore-missing-schemas rendered.yaml
 ```
 
 ## 路由
@@ -86,7 +86,7 @@ kubectl apply --dry-run=client --validate=false -f rendered.yaml
 
 ## CI/CD 摘要
 
-- **validate**：`helm lint` + `helm template` + `kubectl apply --dry-run`
+- **validate**：`helm lint` + `helm template` + `kubeconform`（離線驗證，不需連叢集）
 - **deploy**（push `main` 或手動觸發）：建立 Secret → `helm upgrade --install` 並 `--set` 注入後端／前端映像 tag
 
 需在 GitHub Secrets 設定：`DOCKERHUB_*`、`KUBE_CONFIG_DATA`、以及各應用金鑰（見 workflow 註解）。
