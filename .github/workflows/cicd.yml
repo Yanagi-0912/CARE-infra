@@ -148,11 +148,10 @@ jobs:
           context: ./CARE              # Dockerfile 的上下文目錄
           push: true                   # 推送到 Docker Hub
           tags: |
-            # 兩個標籤同時推送
-            ${{ env.BACKEND_IMAGE }}:${{ needs.generate-tag.outputs.tag }}  # 帶版本號的 tag
-            ${{ env.BACKEND_IMAGE }}:latest  # latest 標籤（方便快速更新）
-          cache-from: type=gha         # 使用 GitHub Actions 快取加速構建
-          cache-to: type=gha,mode=max  # 保存快取以供下次使用
+            ${{ env.BACKEND_IMAGE }}:${{ needs.generate-tag.outputs.tag }}
+            ${{ env.BACKEND_IMAGE }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
   # 工作 3：構建前端映像
   # 
@@ -192,8 +191,8 @@ jobs:
           # 傳遞構建參數給 Dockerfile
           # 這些值會在構建時注入到 React 代碼中
           build-args: |
-            VITE_LIFF_ID=${{ secrets.VITE_LIFF_ID }}          # LINE LIFF ID
-            VITE_API_BASE_URL=${{ secrets.VITE_API_BASE_URL }} # 後端 API URL
+            VITE_LIFF_ID=${{ secrets.VITE_LIFF_ID }}
+            VITE_API_BASE_URL=${{ secrets.VITE_API_BASE_URL }}
           push: true
           tags: |
             ${{ env.FRONTEND_IMAGE }}:${{ needs.generate-tag.outputs.tag }}
