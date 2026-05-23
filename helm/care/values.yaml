@@ -7,7 +7,7 @@ namespace:
 # 對外入口（Ingress / n8n webhook / CORS）
 public:
   scheme: http
-  host: "140.121.196.16"
+  host: "care.soselab.tw"
 
 ingress:
   enabled: true
