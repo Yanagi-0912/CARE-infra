@@ -20,6 +20,7 @@ on:
     # 自動在 push 到這些分支時觸發
     branches:
       - main              # main 分支：構建 → 驗證 → 部署
+      - jamesbranch       # 協作分支
       - feature/*         # feature 分支：構建 → 驗證
   
   pull_request:
@@ -42,6 +43,8 @@ env:
   KUBE_NAMESPACE: care-dev                  # 部署的命名空間
   BACKEND_IMAGE: yanagi0912/care           # 後端映像（Docker Hub）
   FRONTEND_IMAGE: yanagi0912/care-liff     # 前端映像（Docker Hub）
+  BACKEND_REPO: Yanagi-0912/CARE           # 後端原始碼 repo（與 CARE-infra 分開）
+  FRONTEND_REPO: Yanagi-0912/CARE-LIFF     # 前端原始碼 repo
   N8N_IMAGE: n8nio/n8n                      # n8n 官方映像（通常不改）
 
 # GitHub Actions 權限設定
@@ -123,25 +126,22 @@ jobs:
     # 條件：只在 push 或 workflow_dispatch 時執行（PR 時不構建映像）
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     steps:
-      - name: Checkout
+      - name: Checkout backend
         uses: actions/checkout@v4
+        with:
+          repository: ${{ env.BACKEND_REPO }}
+          path: CARE
+          ref: ${{ github.ref_name }}
 
-      # Docker Buildx：高級 Docker 構建工具，支援多平台、快取優化等
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      # 登入 Docker Hub，以便推送映像
       - name: Login to Docker Hub
         uses: docker/login-action@v3
         with:
-          # ⚠️  修改說明：
-          # 在 GitHub repository settings → Secrets → Actions 中新增：
-          # DOCKERHUB_USERNAME：你的 Docker Hub 用戶名
-          # DOCKERHUB_TOKEN：你的 Docker Hub Personal Access Token（而非密碼！）
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      # 構建並推送映像
       - name: Build and push backend
         uses: docker/build-push-action@v5
         with:
@@ -171,8 +171,12 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     steps:
-      - name: Checkout
+      - name: Checkout frontend
         uses: actions/checkout@v4
+        with:
+          repository: ${{ env.FRONTEND_REPO }}
+          path: CARE-LIFF
+          ref: ${{ github.ref_name }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -183,7 +187,6 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      # 構建並推送前端映像
       - name: Build and push frontend
         uses: docker/build-push-action@v5
         with:
