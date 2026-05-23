@@ -1,0 +1,26 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Values.frontend.name }}
+  namespace: {{ include "care.namespace" . }}
+  labels:
+    {{- include "care.frontend.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.frontend.replicaCount }}
+  selector:
+    matchLabels:
+      app: {{ .Values.frontend.name }}
+  template:
+    metadata:
+      labels:
+        app: {{ .Values.frontend.name }}
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: {{ .Values.frontend.name }}
+          image: "{{ .Values.frontend.image.repository }}:{{ .Values.frontend.image.tag }}"
+          imagePullPolicy: {{ .Values.frontend.image.pullPolicy }}
+          ports:
+            - containerPort: {{ .Values.frontend.service.port }}
+          resources:
+            {{- toYaml .Values.frontend.resources | nindent 12 }}

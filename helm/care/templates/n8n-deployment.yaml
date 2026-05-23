@@ -1,0 +1,53 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Values.n8n.name }}
+  namespace: {{ include "care.namespace" . }}
+  labels:
+    {{- include "care.n8n.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.n8n.replicaCount }}
+  selector:
+    matchLabels:
+      app: n8n
+  template:
+    metadata:
+      labels:
+        app: n8n
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: n8n
+          image: "{{ .Values.n8n.image.repository }}:{{ .Values.n8n.image.tag }}"
+          imagePullPolicy: {{ .Values.n8n.image.pullPolicy }}
+          ports:
+            - containerPort: {{ .Values.n8n.port }}
+          env:
+            - name: N8N_PORT
+              value: {{ .Values.n8n.port | quote }}
+            - name: N8N_PATH
+              value: {{ .Values.n8n.path | quote }}
+            - name: N8N_PROTOCOL
+              value: {{ .Values.n8n.protocol | quote }}
+            - name: N8N_HOST
+              value: {{ .Values.public.host | quote }}
+            - name: N8N_EDITOR_BASE_URL
+              value: {{ include "care.n8nBaseUrl" . | quote }}
+            - name: WEBHOOK_URL
+              value: {{ include "care.n8nBaseUrl" . | quote }}
+            - name: GENERIC_TIMEZONE
+              value: {{ .Values.n8n.timezone | quote }}
+            - name: N8N_SECURE_COOKIE
+              value: {{ .Values.n8n.secureCookie | quote }}
+          volumeMounts:
+            - name: n8n-data
+              mountPath: /home/node/.n8n
+          envFrom:
+            - configMapRef:
+                name: n8n-config
+          resources:
+            {{- toYaml .Values.n8n.resources | nindent 12 }}
+      volumes:
+        - name: n8n-data
+          persistentVolumeClaim:
+            claimName: n8n-data
