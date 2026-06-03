@@ -46,6 +46,9 @@ env:
   BACKEND_REPO: Yanagi-0912/CARE           # 後端原始碼 repo（與 CARE-infra 分開）
   FRONTEND_REPO: Yanagi-0912/CARE-LIFF     # 前端原始碼 repo
   N8N_IMAGE: n8nio/n8n                      # n8n 官方映像（通常不改）
+  PUBLIC_HOST: care.jamessu2016.com         # Cloudflare Tunnel 對外網域（soselab 轉發完成後可改回 care.soselab.tw）
+  PUBLIC_SCHEME: https
+  VITE_API_BASE_URL: https://care.jamessu2016.com/api
 
 # GitHub Actions 權限設定
 permissions:
@@ -195,7 +198,7 @@ jobs:
           # 這些值會在構建時注入到 React 代碼中
           build-args: |
             VITE_LIFF_ID=${{ secrets.VITE_LIFF_ID }}
-            VITE_API_BASE_URL=${{ secrets.VITE_API_BASE_URL }}
+            VITE_API_BASE_URL=${{ env.VITE_API_BASE_URL }}
           push: true
           tags: |
             ${{ env.FRONTEND_IMAGE }}:${{ needs.generate-tag.outputs.tag }}
@@ -312,6 +315,8 @@ jobs:
             --set backend.image.tag=${{ needs.generate-tag.outputs.tag }} \
             --set frontend.image.repository=${{ env.FRONTEND_IMAGE }} \
             --set frontend.image.tag=${{ needs.generate-tag.outputs.tag }} \
+            --set public.host=${{ env.PUBLIC_HOST }} \
+            --set public.scheme=${{ env.PUBLIC_SCHEME }} \
             --wait --timeout 10m
 
       # 等待所有 Deployment 完成滾動更新
