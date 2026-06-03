@@ -1,7 +1,8 @@
 # 預設 values；CI 部署時以 --set 覆寫映像 tag，Secret 由 CI 另行建立。
 
 namespace:
-  create: true
+  # false：namespace 由 kubectl / helm --create-namespace 建立（避免與既有 care-dev 衝突）
+  create: false
   name: care-dev
 
 # 對外入口（Ingress / n8n webhook / CORS）

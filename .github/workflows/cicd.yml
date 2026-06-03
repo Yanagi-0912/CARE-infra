@@ -311,6 +311,7 @@ jobs:
           helm upgrade --install "${{ env.HELM_RELEASE }}" "${{ env.HELM_CHART }}" \
             --namespace "${{ env.KUBE_NAMESPACE }}" \
             --create-namespace \
+            --set namespace.create=false \
             --set backend.image.repository=${{ env.BACKEND_IMAGE }} \
             --set backend.image.tag=${{ needs.generate-tag.outputs.tag }} \
             --set frontend.image.repository=${{ env.FRONTEND_IMAGE }} \
