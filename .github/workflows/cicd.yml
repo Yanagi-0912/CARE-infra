@@ -167,7 +167,7 @@ jobs:
   # 前置要求：
   #   - GitHub Secrets 中設定：
   #     - VITE_LIFF_ID：LINE LIFF ID
-  #     - VITE_API_BASE_URL：後端 API URL（例如 http://example.com/api）
+  #     - VITE_API_BASE_URL：網域根 URL（例如 https://example.com；程式會加 /api/...）
   #   - ./CARE-LIFF 目錄有 Dockerfile 和 React 程式碼
 
   build-frontend:
