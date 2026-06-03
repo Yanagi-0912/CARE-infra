@@ -1,13 +1,14 @@
 # 預設 values；CI 部署時以 --set 覆寫映像 tag，Secret 由 CI 另行建立。
 
 namespace:
-  create: true
+  # false：namespace 由 kubectl / helm --create-namespace 建立（避免與既有 care-dev 衝突）
+  create: false
   name: care-dev
 
 # 對外入口（Ingress / n8n webhook / CORS）
 public:
-  scheme: http
-  host: "care.soselab.tw"
+  scheme: https
+  host: "care.jamessu2016.com"
 
 ingress:
   enabled: true
@@ -25,7 +26,7 @@ backend:
   replicaCount: 1
   image:
     repository: yanagi0912/care
-    tag: "0.1.0"
+    tag: "0.1.1"
     pullPolicy: IfNotPresent
   service:
     port: 8000
@@ -57,7 +58,7 @@ frontend:
   replicaCount: 1
   image:
     repository: yanagi0912/care-liff
-    tag: "0.1.0"
+    tag: "0.1.1"
     pullPolicy: IfNotPresent
   service:
     port: 80
