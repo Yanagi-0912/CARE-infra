@@ -7,8 +7,9 @@
 #   4. 自動部署到 Kubernetes 叢集
 #
 # 觸發時機：
-#   - push 到 main 分支或 feature/* 分支：構建並驗證（不部署）
-#   - 只有 push 到 main 才會自動部署
+#   - push 到 main：構建、驗證、部署（需 KUBE_CONFIG_DATA）
+#   - push 到 feature/*：僅驗證 Helm（不 build、不部署）
+#   - jamesbranch：不觸發 workflow（請 merge 到 main 再測）
 #   - pull_request 到 main：驗證（不構建和部署）
 #   - workflow_dispatch：手動觸發（支援自訂 tag）
 
@@ -19,9 +20,8 @@ on:
   push:
     # 自動在 push 到這些分支時觸發
     branches:
-      - main              # main 分支：構建 → 驗證 → 部署
-      - jamesbranch       # 協作分支
-      - feature/*         # feature 分支：構建 → 驗證
+      - main              # 構建 → 驗證 → 部署
+      - feature/*         # 僅 helm/kubeconform 驗證
   
   pull_request:
     # PR 到 main 時，只進行驗證（不構建映像）
@@ -73,6 +73,7 @@ jobs:
   #   - short_sha：git 短 SHA（用於快速識別）
   
   generate-tag:
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
     runs-on: ubuntu-latest
     # 輸出供其他工作使用
     outputs:
@@ -125,10 +126,9 @@ jobs:
   #   - 速度更快，減少重複構建相同的層
 
   build-backend:
-    needs: generate-tag  # 等待 generate-tag 完成
+    needs: generate-tag
     runs-on: ubuntu-latest
-    # 條件：只在 push 或 workflow_dispatch 時執行（PR 時不構建映像）
-    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
     steps:
       - name: Checkout backend
         uses: actions/checkout@v4
@@ -173,7 +173,7 @@ jobs:
   build-frontend:
     needs: generate-tag
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
     steps:
       - name: Checkout frontend
         uses: actions/checkout@v4
@@ -241,12 +241,13 @@ jobs:
           curl -fsSL "https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz" | tar xz
           ./kubeconform -summary -ignore-missing-schemas rendered.yaml
 
-  # 工作 5：部署到 Kubernetes 叢集
+  # 工作 5：部署到 Kubernetes 叢集（Push 式 CD）
   # 
   # 執行條件：
-  #   - push 到 main 分支（自動部署）
+  #   - push 到 main（自動部署）
   #   - 或手動 workflow_dispatch 觸發
   #   - 並且所有先前的工作都成功
+  #   - K8s API 須能從 GitHub Actions 連線（內網叢集需 VPN/轉發）
   # 
   # 部署步驟：
   #   1. 設定 kubeconfig（連接叢集）
@@ -266,7 +267,7 @@ jobs:
       - build-backend     # 需要後端映像
       - build-frontend    # 需要前端映像
       - validate          # 需要驗證通過
-    # 只在 push main 或手動觸發時部署（不在 PR 時部署）
+    # 僅 push main 或手動觸發時部署
     if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
@@ -281,31 +282,42 @@ jobs:
       - name: Set up Helm
         uses: azure/setup-helm@v4
 
-      # 設定 kubeconfig 以連接 Kubernetes 叢集
       - name: Load kubeconfig
+        env:
+          KUBE_CONFIG_DATA: ${{ secrets.KUBE_CONFIG_DATA }}
         run: |
+          if [ -z "$KUBE_CONFIG_DATA" ]; then
+            echo "::error::請在 GitHub Secrets 設定 KUBE_CONFIG_DATA（kubeconfig 的 base64）"
+            exit 1
+          fi
           mkdir -p "$HOME/.kube"
-          # 解碼 base64 的 kubeconfig 並保存
-          echo '${{ secrets.KUBE_CONFIG_DATA }}' | base64 -d > "$HOME/.kube/config"
-          # 設定權限為只有所有者可讀
+          echo "$KUBE_CONFIG_DATA" | base64 -d > "$HOME/.kube/config"
           chmod 600 "$HOME/.kube/config"
 
-      # 建立或更新 Secret
+      - name: Verify cluster connection
+        run: kubectl cluster-info
+
       - name: Create k8s Secret
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          MONGODB_URI: ${{ secrets.MONGODB_URI }}
+          LINE_CHANNEL_ID: ${{ secrets.LINE_CHANNEL_ID }}
+          LINE_CHANNEL_SECRET: ${{ secrets.LINE_CHANNEL_SECRET }}
+          LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
+          LIFF_CHANNEL_ID: ${{ secrets.LIFF_CHANNEL_ID }}
+          LIFF_CHANNEL_SECRET: ${{ secrets.LIFF_CHANNEL_SECRET }}
+          LIFF_ID: ${{ secrets.LIFF_ID }}
         run: |
-          # kubectl create secret 會自動 Base64 編碼敏感資訊
-          # --dry-run=client：不實際建立，只生成 YAML
-          # kubectl apply：如果已存在則更新，不存在則建立
           kubectl create secret generic care-backend-secret \
-            --from-literal=GEMINI_API_KEY='${{ secrets.GEMINI_API_KEY }}' \
-            --from-literal=MONGODB_URI='${{ secrets.MONGODB_URI }}' \
-            --from-literal=LINE_CHANNEL_ID='${{ secrets.LINE_CHANNEL_ID }}' \
-            --from-literal=LINE_CHANNEL_SECRET='${{ secrets.LINE_CHANNEL_SECRET }}' \
-            --from-literal=LINE_CHANNEL_ACCESS_TOKEN='${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}' \
-            --from-literal=LIFF_CHANNEL_ID='${{ secrets.LIFF_CHANNEL_ID }}' \
-            --from-literal=LIFF_CHANNEL_SECRET='${{ secrets.LIFF_CHANNEL_SECRET }}' \
-            --from-literal=LIFF_ID='${{ secrets.LIFF_ID }}' \
-            -n care-dev --dry-run=client -o yaml | kubectl apply -f - || true
+            --from-literal=GEMINI_API_KEY="$GEMINI_API_KEY" \
+            --from-literal=MONGODB_URI="$MONGODB_URI" \
+            --from-literal=LINE_CHANNEL_ID="$LINE_CHANNEL_ID" \
+            --from-literal=LINE_CHANNEL_SECRET="$LINE_CHANNEL_SECRET" \
+            --from-literal=LINE_CHANNEL_ACCESS_TOKEN="$LINE_CHANNEL_ACCESS_TOKEN" \
+            --from-literal=LIFF_CHANNEL_ID="$LIFF_CHANNEL_ID" \
+            --from-literal=LIFF_CHANNEL_SECRET="$LIFF_CHANNEL_SECRET" \
+            --from-literal=LIFF_ID="$LIFF_ID" \
+            -n "$KUBE_NAMESPACE" --dry-run=client -o yaml | kubectl apply -f -
 
       - name: Deploy with Helm
         run: |
@@ -315,8 +327,10 @@ jobs:
             --set namespace.create=false \
             --set backend.image.repository=${{ env.BACKEND_IMAGE }} \
             --set backend.image.tag=${{ needs.generate-tag.outputs.tag }} \
+            --set backend.image.pullPolicy=Always \
             --set frontend.image.repository=${{ env.FRONTEND_IMAGE }} \
             --set frontend.image.tag=${{ needs.generate-tag.outputs.tag }} \
+            --set frontend.image.pullPolicy=Always \
             --set public.host=${{ env.PUBLIC_HOST }} \
             --set public.scheme=${{ env.PUBLIC_SCHEME }} \
             --wait --timeout 10m
