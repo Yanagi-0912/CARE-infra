@@ -45,6 +45,7 @@ env:
   FRONTEND_IMAGE: yanagi0912/care-liff     # 前端映像（Docker Hub）
   BACKEND_REPO: Yanagi-0912/CARE           # 後端原始碼 repo（與 CARE-infra 分開）
   FRONTEND_REPO: Yanagi-0912/CARE-LIFF     # 前端原始碼 repo
+  FRONTEND_REF: main                       # CARE-LIFF 僅有 main，勿跟 CARE-infra 分支同名
   N8N_IMAGE: n8nio/n8n                      # n8n 官方映像（通常不改）
   PUBLIC_HOST: care.jamessu2016.com         # Cloudflare Tunnel 對外網域（soselab 轉發完成後可改回 care.soselab.tw）
   PUBLIC_SCHEME: https
@@ -179,7 +180,7 @@ jobs:
         with:
           repository: ${{ env.FRONTEND_REPO }}
           path: CARE-LIFF
-          ref: ${{ github.ref_name }}
+          ref: ${{ env.FRONTEND_REF }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
