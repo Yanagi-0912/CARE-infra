@@ -86,10 +86,56 @@ kubeconform -summary -ignore-missing-schemas rendered.yaml
 
 ## CI/CD 摘要
 
-- **validate**：`helm lint` + `helm template` + `kubeconform`（離線驗證，不需連叢集）
-- **deploy**（push `main` 或手動觸發）：建立 Secret → `helm upgrade --install` 並 `--set` 注入後端／前端映像 tag
+**任一 repo merge 到 `main` → 自動 build 前後端映像 + deploy 到 K3s**
 
-需在 GitHub Secrets 設定：`DOCKERHUB_*`、`KUBE_CONFIG_DATA`、以及各應用金鑰（見 workflow 註解）。
+| 誰 merge 到 main | 會發生什麼 |
+|------------------|------------|
+| **CARE**（後端） | `trigger-deploy.yml` → 通知 CARE-infra → build 前後端 + deploy |
+| **CARE-LIFF**（前端） | 同上 |
+| **CARE-infra**（Helm） | 直接跑 `cicd.yml` → build 前後端 + deploy |
+
+- **build**（GitHub 雲端 runner）：建置並推送 Docker Hub 映像
+- **validate**（GitHub 雲端 runner）：`helm lint` + `helm template` + `kubeconform`
+- **deploy**（**self-hosted runner，K3s VM**）：建立 Secret → `helm upgrade --install`
+
+### Secrets
+
+**CARE-infra**（Settings → Secrets）：`DOCKERHUB_*`、LINE/Gemini/MongoDB 等（見 workflow）。
+
+**CARE** 與 **CARE-LIFF** 各需一個 **`INFRA_DEPLOY_TOKEN`**（Personal Access Token，能觸發 CARE-infra 的 workflow）：
+
+1. GitHub → Settings → Developer settings → Personal access tokens
+2. 建立 token（classic：`repo` 權限；或 fine-grained：CARE-infra 的 Actions 寫入）
+3. 分別加到 **CARE**、**CARE-LIFF** repo 的 Secrets，名稱：`INFRA_DEPLOY_TOKEN`
+
+`KUBE_CONFIG_DATA` 在 VM runner 上**可選**（deploy 會優先讀 `/etc/rancher/k3s/k3s.yaml`）。
+
+### Self-hosted runner（CD 必備）
+
+K3s API 位址為 `127.0.0.1:6443`，GitHub 雲端 runner 無法連線，**deploy job 必須在 K3s VM 上跑 self-hosted runner**。
+
+1. GitHub → **Yanagi-0912/CARE-infra** → **Settings** → **Actions** → **Runners** → **New self-hosted runner**
+2. 在 VM（`192.168.101.41`）執行（token 一次性，從上一步複製）：
+
+```bash
+git clone https://github.com/Yanagi-0912/CARE-infra.git
+cd CARE-infra
+sudo bash scripts/setup-self-hosted-runner.sh \
+  --url https://github.com/Yanagi-0912/CARE-infra \
+  --token PASTE_TOKEN_HERE
+```
+
+3. Runners 頁面出現 **Idle** 的 `care-k3s-vm` 後，push `main` 或手動 **workflow_dispatch** 即會自動部署。
+
+Runner labels：`self-hosted`, `Linux`, `care-k3s`（對應 workflow `runs-on: [self-hosted, Linux, care-k3s]`）。
+
+維護指令（在 VM）：
+
+```bash
+sudo /opt/actions-runner/svc.sh status
+sudo /opt/actions-runner/svc.sh stop
+sudo /opt/actions-runner/svc.sh start
+```
 
 ## K3s 快速部署（實踐室主機）
 

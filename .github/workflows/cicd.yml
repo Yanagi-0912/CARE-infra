@@ -28,6 +28,10 @@ on:
     branches:
       - main
   
+  repository_dispatch:
+    # CARE / CARE-LIFF merge 到 main 後，由 trigger-deploy workflow 呼叫
+    types: [deploy]
+
   workflow_dispatch:
     # 允許手動觸發（GitHub UI 的 Actions 頁面）
     inputs:
@@ -45,7 +49,8 @@ env:
   FRONTEND_IMAGE: yanagi0912/care-liff     # 前端映像（Docker Hub）
   BACKEND_REPO: Yanagi-0912/CARE           # 後端原始碼 repo（與 CARE-infra 分開）
   FRONTEND_REPO: Yanagi-0912/CARE-LIFF     # 前端原始碼 repo
-  FRONTEND_REF: main                       # CARE-LIFF 僅有 main，勿跟 CARE-infra 分支同名
+  BACKEND_REF: main                        # 部署永遠取 main 最新
+  FRONTEND_REF: main
   N8N_IMAGE: n8nio/n8n                      # n8n 官方映像（通常不改）
   PUBLIC_HOST: care.jamessu2016.com         # Cloudflare Tunnel 對外網域（soselab 轉發完成後可改回 care.soselab.tw）
   PUBLIC_SCHEME: https
@@ -73,7 +78,7 @@ jobs:
   #   - short_sha：git 短 SHA（用於快速識別）
   
   generate-tag:
-    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'repository_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
     runs-on: ubuntu-latest
     # 輸出供其他工作使用
     outputs:
@@ -88,8 +93,13 @@ jobs:
       - name: Generate image tag
         id: tag  # 步驟 ID，用於引用輸出
         run: |
-          # 取得當前 git commit 的短 SHA（前 7 位）
-          SHORT_SHA=$(git rev-parse --short HEAD)
+          # repository_dispatch：用觸發來源 repo 的 commit；其餘用 CARE-infra 自身 commit
+          if [ "${{ github.event_name }}" == "repository_dispatch" ]; then
+            SHORT_SHA=$(echo "${{ github.event.client_payload.sha }}" | cut -c1-7)
+            echo "Triggered by ${{ github.event.client_payload.source }}@${SHORT_SHA}"
+          else
+            SHORT_SHA=$(git rev-parse --short HEAD)
+          fi
           echo "short_sha=${SHORT_SHA}" >> $GITHUB_OUTPUT
           
           # 判斷是否手動觸發且提供了自訂 tag
@@ -128,14 +138,14 @@ jobs:
   build-backend:
     needs: generate-tag
     runs-on: ubuntu-latest
-    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'repository_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
     steps:
       - name: Checkout backend
         uses: actions/checkout@v4
         with:
           repository: ${{ env.BACKEND_REPO }}
           path: CARE
-          ref: ${{ github.ref_name }}
+          ref: ${{ env.BACKEND_REF }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -173,7 +183,7 @@ jobs:
   build-frontend:
     needs: generate-tag
     runs-on: ubuntu-latest
-    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'repository_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
     steps:
       - name: Checkout frontend
         uses: actions/checkout@v4
@@ -247,7 +257,7 @@ jobs:
   #   - push 到 main（自動部署）
   #   - 或手動 workflow_dispatch 觸發
   #   - 並且所有先前的工作都成功
-  #   - K8s API 須能從 GitHub Actions 連線（內網叢集需 VPN/轉發）
+  #   - 須在 K3s VM 上執行 self-hosted runner（KUBE API 為 127.0.0.1:6443，雲端 runner 連不到）
   # 
   # 部署步驟：
   #   1. 設定 kubeconfig（連接叢集）
@@ -268,8 +278,8 @@ jobs:
       - build-frontend    # 需要前端映像
       - validate          # 需要驗證通過
     # 僅 push main 或手動觸發時部署
-    if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'repository_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    runs-on: [self-hosted, Linux, care-k3s]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -286,12 +296,16 @@ jobs:
         env:
           KUBE_CONFIG_DATA: ${{ secrets.KUBE_CONFIG_DATA }}
         run: |
-          if [ -z "$KUBE_CONFIG_DATA" ]; then
-            echo "::error::請在 GitHub Secrets 設定 KUBE_CONFIG_DATA（kubeconfig 的 base64）"
+          mkdir -p "$HOME/.kube"
+          # self-hosted runner 在 K3s 同一台 VM：直接用本機 k3s.yaml（127.0.0.1:6443 才連得到）
+          if [ -r /etc/rancher/k3s/k3s.yaml ]; then
+            cp /etc/rancher/k3s/k3s.yaml "$HOME/.kube/config"
+          elif [ -n "$KUBE_CONFIG_DATA" ]; then
+            echo "$KUBE_CONFIG_DATA" | base64 -d > "$HOME/.kube/config"
+          else
+            echo "::error::找不到 /etc/rancher/k3s/k3s.yaml，且未設定 KUBE_CONFIG_DATA"
             exit 1
           fi
-          mkdir -p "$HOME/.kube"
-          echo "$KUBE_CONFIG_DATA" | base64 -d > "$HOME/.kube/config"
           chmod 600 "$HOME/.kube/config"
 
       - name: Verify cluster connection

@@ -7,6 +7,11 @@ metadata:
     {{- include "care.frontend.labels" . | nindent 4 }}
 spec:
   replicas: {{ .Values.frontend.replicaCount }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
   selector:
     matchLabels:
       app: {{ .Values.frontend.name }}
@@ -22,5 +27,12 @@ spec:
           imagePullPolicy: {{ .Values.frontend.image.pullPolicy }}
           ports:
             - containerPort: {{ .Values.frontend.service.port }}
+          readinessProbe:
+            httpGet:
+              path: /
+              port: {{ .Values.frontend.service.port }}
+            initialDelaySeconds: 3
+            periodSeconds: 5
+            failureThreshold: 3
           resources:
             {{- toYaml .Values.frontend.resources | nindent 12 }}
