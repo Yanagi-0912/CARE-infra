@@ -321,6 +321,7 @@ jobs:
           LIFF_CHANNEL_ID: ${{ secrets.LIFF_CHANNEL_ID }}
           LIFF_CHANNEL_SECRET: ${{ secrets.LIFF_CHANNEL_SECRET }}
           LIFF_ID: ${{ secrets.LIFF_ID }}
+          REDIS_URL: ${{ secrets.REDIS_URL }}
         run: |
           kubectl create secret generic care-backend-secret \
             --from-literal=GEMINI_API_KEY="$GEMINI_API_KEY" \
@@ -331,6 +332,7 @@ jobs:
             --from-literal=LIFF_CHANNEL_ID="$LIFF_CHANNEL_ID" \
             --from-literal=LIFF_CHANNEL_SECRET="$LIFF_CHANNEL_SECRET" \
             --from-literal=LIFF_ID="$LIFF_ID" \
+            --from-literal=REDIS_URL="$REDIS_URL" \
             -n "$KUBE_NAMESPACE" --dry-run=client -o yaml | kubectl apply -f -
 
       - name: Deploy with Helm
