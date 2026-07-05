@@ -47,7 +47,7 @@ backend:
     MONGODB_COLLECTION: "health_articles_chunks"
     MONGODB_VECTOR_INDEX: "vector_index"
     MONGODB_VECTOR_FIELD: "embedding"
-    MONGODB_TEXT_FIELD: "text"
+    MONGODB_TEXT_FIELD: "chunk_content"
     MONGODB_VECTOR_DIM: "3072"
     MEDIA_PARSE_WEBHOOK_URL: "media_parse_webhook_url_here"
     # 預設依 public.host 組出；可在此覆寫
