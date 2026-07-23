@@ -49,7 +49,8 @@ backend:
     MONGODB_VECTOR_FIELD: "embedding"
     MONGODB_TEXT_FIELD: "chunk_content"
     MONGODB_VECTOR_DIM: "3072"
-    MEDIA_PARSE_WEBHOOK_URL: "media_parse_webhook_url_here"
+    # 叢集內打 n8n（對外 /n8n Ingress 目前無 strip-prefix；VM 舊 workflow path 為 UUID）
+    MEDIA_PARSE_WEBHOOK_URL: "http://n8n-service:8100/webhook/bff1fd27-efc4-45cf-b64a-adb0475aa35c"
     # 預設依 public.host 組出；可在此覆寫
     CORS_ALLOW_ORIGINS: ""
 
