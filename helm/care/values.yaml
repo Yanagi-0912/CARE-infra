@@ -51,6 +51,8 @@ backend:
     MONGODB_VECTOR_DIM: "3072"
     # 叢集內打 n8n（對外 /n8n Ingress 目前無 strip-prefix；VM 舊 workflow path 為 UUID）
     MEDIA_PARSE_WEBHOOK_URL: "http://n8n-service:8100/webhook/bff1fd27-efc4-45cf-b64a-adb0475aa35c"
+    # 空字串：依 public.scheme + public.host（LINE TTS 音檔公開網址）
+    PUBLIC_BASE_URL: ""
     # 預設依 public.host 組出；可在此覆寫
     CORS_ALLOW_ORIGINS: ""
 

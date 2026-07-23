@@ -45,6 +45,14 @@ app: n8n
 {{- printf "%s://%s" .Values.public.scheme .Values.public.host }}
 {{- end }}
 
+{{- define "care.publicBaseUrl" -}}
+{{- if .Values.backend.config.PUBLIC_BASE_URL }}
+{{- .Values.backend.config.PUBLIC_BASE_URL }}
+{{- else }}
+{{- include "care.publicOrigin" . }}
+{{- end }}
+{{- end }}
+
 {{- define "care.n8nBaseUrl" -}}
 {{- printf "%s://%s/n8n/" .Values.public.scheme .Values.public.host }}
 {{- end }}

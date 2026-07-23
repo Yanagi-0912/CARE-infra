@@ -16,4 +16,5 @@ data:
   MONGODB_TEXT_FIELD: {{ .Values.backend.config.MONGODB_TEXT_FIELD | quote }}
   MONGODB_VECTOR_DIM: {{ .Values.backend.config.MONGODB_VECTOR_DIM | quote }}
   MEDIA_PARSE_WEBHOOK_URL: {{ .Values.backend.config.MEDIA_PARSE_WEBHOOK_URL | quote }}
+  PUBLIC_BASE_URL: {{ include "care.publicBaseUrl" . | quote }}
   CORS_ALLOW_ORIGINS: {{ include "care.corsAllowOrigins" . | quote }}
