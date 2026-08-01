@@ -39,6 +39,7 @@ kubectl create secret generic care-backend-secret \
   --from-literal=LIFF_CHANNEL_ID='...' \
   --from-literal=LIFF_CHANNEL_SECRET='...' \
   --from-literal=LIFF_ID='...' \
+  --from-literal=COHERE_API_KEY='...' \
   -n care-dev --dry-run=client -o yaml | kubectl apply -f -
 
 # 2. 安裝或升級 release

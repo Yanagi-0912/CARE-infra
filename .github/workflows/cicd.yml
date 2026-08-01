@@ -269,7 +269,7 @@ jobs:
   # 前置要求：
   #   - GitHub Secrets 中設定了：
   #     - KUBE_CONFIG_DATA：kubeconfig 的 base64 編碼（包含叢集位址、認證等）
-  #     - 所有敏感資訊：GEMINI_API_KEY、MONGODB_URI、LINE_*、LIFF_*、REDIS_URL、FIRECRAWL_API_KEY 等
+  #     - 所有敏感資訊：GEMINI_API_KEY、MONGODB_URI、LINE_*、LIFF_*、REDIS_URL、FIRECRAWL_API_KEY、COHERE_API_KEY 等
 
   deploy:
     needs:
@@ -323,6 +323,7 @@ jobs:
           LIFF_ID: ${{ secrets.LIFF_ID }}
           REDIS_URL: ${{ secrets.REDIS_URL }}
           FIRECRAWL_API_KEY: ${{ secrets.FIRECRAWL_API_KEY }}
+          COHERE_API_KEY: ${{ secrets.COHERE_API_KEY }}
         run: |
           kubectl create secret generic care-backend-secret \
             --from-literal=GEMINI_API_KEY="$GEMINI_API_KEY" \
@@ -335,6 +336,7 @@ jobs:
             --from-literal=LIFF_ID="$LIFF_ID" \
             --from-literal=REDIS_URL="$REDIS_URL" \
             --from-literal=FIRECRAWL_API_KEY="$FIRECRAWL_API_KEY" \
+            --from-literal=COHERE_API_KEY="$COHERE_API_KEY" \
             -n "$KUBE_NAMESPACE" --dry-run=client -o yaml | kubectl apply -f -
 
       - name: Deploy with Helm

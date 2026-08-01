@@ -23,3 +23,4 @@ secret:
     LIFF_CHANNEL_ID: "your_liff_channel_id"
     LIFF_CHANNEL_SECRET: "your_liff_channel_secret"
     LIFF_ID: "your_liff_id"
+    COHERE_API_KEY: "your_cohere_api_key_here"
