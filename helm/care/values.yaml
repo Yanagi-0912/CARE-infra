@@ -51,6 +51,10 @@ backend:
     MONGODB_VECTOR_DIM: "3072"
     # Atlas Search（BM25）；與 vector_index 不同的索引
     MONGODB_TEXT_INDEX: "care_text_index"
+    # 使用者上傳文件暫存（與官方 KB 分離；Atlas 需有對應 Vector Search index）
+    MONGODB_USER_DOCS_COLLECTION: "user_document_chunks"
+    MONGODB_USER_DOCS_VECTOR_INDEX: "user_document_chunks_vector"
+    USER_DOCS_TTL_SECONDS: "86400"
     # Hybrid retrieval：向量 + BM25，RRF 融合
     RAG_HYBRID_ENABLED: "true"
     RAG_RRF_K: "60"

@@ -16,6 +16,9 @@ data:
   MONGODB_TEXT_FIELD: {{ .Values.backend.config.MONGODB_TEXT_FIELD | quote }}
   MONGODB_VECTOR_DIM: {{ .Values.backend.config.MONGODB_VECTOR_DIM | quote }}
   MONGODB_TEXT_INDEX: {{ .Values.backend.config.MONGODB_TEXT_INDEX | quote }}
+  MONGODB_USER_DOCS_COLLECTION: {{ .Values.backend.config.MONGODB_USER_DOCS_COLLECTION | quote }}
+  MONGODB_USER_DOCS_VECTOR_INDEX: {{ .Values.backend.config.MONGODB_USER_DOCS_VECTOR_INDEX | quote }}
+  USER_DOCS_TTL_SECONDS: {{ .Values.backend.config.USER_DOCS_TTL_SECONDS | quote }}
   RAG_HYBRID_ENABLED: {{ .Values.backend.config.RAG_HYBRID_ENABLED | quote }}
   RAG_RRF_K: {{ .Values.backend.config.RAG_RRF_K | quote }}
   MEDIA_PARSE_WEBHOOK_URL: {{ .Values.backend.config.MEDIA_PARSE_WEBHOOK_URL | quote }}
