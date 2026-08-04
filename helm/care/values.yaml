@@ -49,6 +49,11 @@ backend:
     MONGODB_VECTOR_FIELD: "embedding"
     MONGODB_TEXT_FIELD: "chunk_content"
     MONGODB_VECTOR_DIM: "3072"
+    # Atlas Search（BM25）；與 vector_index 不同的索引
+    MONGODB_TEXT_INDEX: "care_text_index"
+    # Hybrid retrieval：向量 + BM25，RRF 融合
+    RAG_HYBRID_ENABLED: "true"
+    RAG_RRF_K: "60"
     # 叢集內打 n8n（對外 /n8n Ingress 目前無 strip-prefix；VM 舊 workflow path 為 UUID）
     MEDIA_PARSE_WEBHOOK_URL: "http://n8n-service:8100/webhook/bff1fd27-efc4-45cf-b64a-adb0475aa35c"
     # 空字串：依 public.scheme + public.host（LINE TTS 音檔公開網址）
