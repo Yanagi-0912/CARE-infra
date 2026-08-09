@@ -41,6 +41,16 @@ app: {{ .Values.frontend.name }}
 app: n8n
 {{- end }}
 
+{{- define "care.asr.labels" -}}
+{{ include "care.labels" . }}
+app: local-asr
+{{- end }}
+
+{{- define "care.parser.labels" -}}
+{{ include "care.labels" . }}
+app: local-parser
+{{- end }}
+
 {{- define "care.publicOrigin" -}}
 {{- printf "%s://%s" .Values.public.scheme .Values.public.host }}
 {{- end }}

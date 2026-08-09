@@ -1,0 +1,19 @@
+{{- /*
+  同 local-asr：Service 名稱對齊 docker-compose 的服務名，
+  n8n workflow 內的 http://local-parser:8100/parse 不需改動。
+*/}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: local-parser
+  namespace: {{ include "care.namespace" . }}
+  labels:
+    {{- include "care.parser.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    app: local-parser
+  ports:
+    - name: http
+      port: {{ .Values.parser.service.port }}
+      targetPort: {{ .Values.parser.port }}

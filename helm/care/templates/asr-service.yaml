@@ -1,0 +1,19 @@
+{{- /*
+  Service 名稱刻意維持 local-asr，與 CARE-n8n/docker-compose.yml 的服務名一致，
+  這樣 n8n workflow 內的 http://local-asr:8200/transcribe 不用改就能在叢集內解析。
+*/}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: local-asr
+  namespace: {{ include "care.namespace" . }}
+  labels:
+    {{- include "care.asr.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    app: local-asr
+  ports:
+    - name: http
+      port: {{ .Values.asr.service.port }}
+      targetPort: {{ .Values.asr.port }}

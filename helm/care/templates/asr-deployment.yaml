@@ -1,0 +1,62 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Values.asr.name }}
+  namespace: {{ include "care.namespace" . }}
+  labels:
+    {{- include "care.asr.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.asr.replicaCount }}
+  selector:
+    matchLabels:
+      app: local-asr
+  template:
+    metadata:
+      labels:
+        app: local-asr
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: local-asr
+          image: "{{ .Values.asr.image.repository }}:{{ .Values.asr.image.tag }}"
+          imagePullPolicy: {{ .Values.asr.image.pullPolicy }}
+          ports:
+            - containerPort: {{ .Values.asr.port }}
+          envFrom:
+            # WHISPER_MODEL / WHISPER_COMPUTE_TYPE 來自 n8n-config
+            # （該 ConfigMap 是整個 n8n stack 共用的設定，不只 n8n 本身）
+            - configMapRef:
+                name: n8n-config
+          volumeMounts:
+            - name: asr-model-cache
+              mountPath: /root/.cache/huggingface
+          {{- /*
+            只掛 startupProbe + 寬鬆的 livenessProbe，刻意不設 readinessProbe：
+            local_asr 的 /transcribe 是在 async endpoint 裡同步呼叫 whisper，
+            轉錄期間 event loop 被卡住，/health 不會回應。若設 readinessProbe，
+            pod 會在轉錄途中被踢出 Service endpoints，導致同時進來的第二個請求失敗。
+          */}}
+          startupProbe:
+            httpGet:
+              path: /health
+              port: {{ .Values.asr.port }}
+            periodSeconds: 5
+            failureThreshold: 30
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: {{ .Values.asr.port }}
+            periodSeconds: 30
+            timeoutSeconds: 10
+            # 30s × 6 ≈ 容忍 3 分鐘的轉錄阻塞才判定真的掛掉
+            failureThreshold: 6
+          resources:
+            {{- toYaml .Values.asr.resources | nindent 12 }}
+      volumes:
+        - name: asr-model-cache
+        {{- if .Values.asr.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: asr-model-cache
+        {{- else }}
+          emptyDir: {}
+        {{- end }}

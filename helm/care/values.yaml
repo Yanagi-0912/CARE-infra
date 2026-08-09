@@ -111,7 +111,56 @@ n8n:
       cpu: 1000m
       memory: 1Gi
       ephemeral-storage: 1Gi
+  # n8n-config ConfigMap：整個 n8n stack 共用（n8n / local-asr / local-parser 都 envFrom 它）
   config:
     WHISPER_MODEL: "small"
     WHISPER_COMPUTE_TYPE: "int8"
     PARSER_MAX_FILE_SIZE_MB: "20"
+
+# 語音轉文字（faster-whisper）；n8n workflow 以 http://local-asr:8200/transcribe 呼叫
+asr:
+  name: care-asr
+  replicaCount: 1
+  image:
+    repository: yanagi0912/care-asr
+    tag: latest
+    pullPolicy: IfNotPresent
+  service:
+    port: 8200
+  port: 8200
+  persistence:
+    # 關閉時改用 emptyDir，代價是每次 pod 重啟都重新下載 Whisper 模型
+    enabled: true
+    storageClass: local-path
+    size: 5Gi
+  resources:
+    requests:
+      # whisper small + int8 常駐約 1GB；CPU 給越多轉錄越快
+      cpu: 500m
+      memory: 1Gi
+      ephemeral-storage: 512Mi
+    limits:
+      cpu: 2000m
+      memory: 2Gi
+      ephemeral-storage: 1Gi
+
+# 文件解析（pdf/docx/xlsx/pptx/html…）；n8n workflow 以 http://local-parser:8100/parse 呼叫
+parser:
+  name: care-parser
+  replicaCount: 1
+  image:
+    repository: yanagi0912/care-parser
+    tag: latest
+    pullPolicy: IfNotPresent
+  service:
+    port: 8100
+  port: 8100
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+      ephemeral-storage: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+      ephemeral-storage: 512Mi

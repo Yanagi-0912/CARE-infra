@@ -1,0 +1,44 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Values.parser.name }}
+  namespace: {{ include "care.namespace" . }}
+  labels:
+    {{- include "care.parser.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.parser.replicaCount }}
+  selector:
+    matchLabels:
+      app: local-parser
+  template:
+    metadata:
+      labels:
+        app: local-parser
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: local-parser
+          image: "{{ .Values.parser.image.repository }}:{{ .Values.parser.image.tag }}"
+          imagePullPolicy: {{ .Values.parser.image.pullPolicy }}
+          ports:
+            - containerPort: {{ .Values.parser.port }}
+          envFrom:
+            # PARSER_MAX_FILE_SIZE_MB 來自共用的 n8n-config
+            - configMapRef:
+                name: n8n-config
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: {{ .Values.parser.port }}
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: {{ .Values.parser.port }}
+            initialDelaySeconds: 15
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+            {{- toYaml .Values.parser.resources | nindent 12 }}

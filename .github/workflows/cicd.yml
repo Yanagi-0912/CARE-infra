@@ -52,6 +52,10 @@ env:
   BACKEND_REF: main                        # 部署永遠取 main 最新
   FRONTEND_REF: main
   N8N_IMAGE: n8nio/n8n                      # n8n 官方映像（通常不改）
+  ASR_IMAGE: yanagi0912/care-asr           # 語音轉文字映像（faster-whisper）
+  PARSER_IMAGE: yanagi0912/care-parser     # 文件解析映像
+  N8N_STACK_REPO: Yanagi-0912/CARE-n8n     # local_asr / local_parser 原始碼 repo
+  N8N_STACK_REF: main
   PUBLIC_HOST: care.jamessu2016.com         # Cloudflare Tunnel 對外網域（soselab 轉發完成後可改回 care.soselab.tw）
   PUBLIC_SCHEME: https
   VITE_API_BASE_URL: https://care.jamessu2016.com
@@ -217,6 +221,81 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+  # 工作 3.5：構建 n8n stack 的下游服務映像（ASR / Parser）
+  #
+  # 背景：
+  #   這兩個服務原本只存在於 CARE-n8n 的 docker-compose，上雲時被漏掉，
+  #   導致 n8n workflow 呼叫不到下游、webhook 回空 body、所有多媒體訊息失效。
+  #
+  # 與後端／前端的差異：
+  #   - 原始碼在 CARE-n8n repo，且 Dockerfile 位於子目錄（local_asr / local_parser）
+  #   - ASR 映像較大（faster-whisper + ctranslate2），build 時間明顯較長
+  #   - Whisper 模型不打包進映像，改由 runtime 下載並存到 PVC
+
+  build-asr:
+    needs: generate-tag
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'repository_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    steps:
+      - name: Checkout n8n stack
+        uses: actions/checkout@v5
+        with:
+          repository: ${{ env.N8N_STACK_REPO }}
+          path: CARE-n8n
+          ref: ${{ env.N8N_STACK_REF }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v4
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push ASR
+        uses: docker/build-push-action@v7
+        with:
+          context: ./CARE-n8n/local_asr
+          push: true
+          tags: |
+            ${{ env.ASR_IMAGE }}:${{ needs.generate-tag.outputs.tag }}
+            ${{ env.ASR_IMAGE }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  build-parser:
+    needs: generate-tag
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'repository_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    steps:
+      - name: Checkout n8n stack
+        uses: actions/checkout@v5
+        with:
+          repository: ${{ env.N8N_STACK_REPO }}
+          path: CARE-n8n
+          ref: ${{ env.N8N_STACK_REF }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v4
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push Parser
+        uses: docker/build-push-action@v7
+        with:
+          context: ./CARE-n8n/local_parser
+          push: true
+          tags: |
+            ${{ env.PARSER_IMAGE }}:${{ needs.generate-tag.outputs.tag }}
+            ${{ env.PARSER_IMAGE }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
   # 工作 4：驗證 Kubernetes 資源配置
   # 
   # 目的：確保 Helm chart 渲染結果有效，早期發現配置問題
@@ -246,6 +325,8 @@ jobs:
             --namespace "${{ env.KUBE_NAMESPACE }}" \
             --set backend.image.tag=ci-validate \
             --set frontend.image.tag=ci-validate \
+            --set asr.image.tag=ci-validate \
+            --set parser.image.tag=ci-validate \
             > rendered.yaml
           test -s rendered.yaml
           curl -fsSL "https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz" | tar xz
@@ -276,6 +357,8 @@ jobs:
       - generate-tag      # 需要映像標籤
       - build-backend     # 需要後端映像
       - build-frontend    # 需要前端映像
+      - build-asr         # 需要 ASR 映像
+      - build-parser      # 需要 Parser 映像
       - validate          # 需要驗證通過
     # 僅 push main 或手動觸發時部署
     if: github.event_name == 'workflow_dispatch' || github.event_name == 'repository_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
@@ -351,9 +434,15 @@ jobs:
             --set frontend.image.repository=${{ env.FRONTEND_IMAGE }} \
             --set frontend.image.tag=${{ needs.generate-tag.outputs.tag }} \
             --set frontend.image.pullPolicy=Always \
+            --set asr.image.repository=${{ env.ASR_IMAGE }} \
+            --set asr.image.tag=${{ needs.generate-tag.outputs.tag }} \
+            --set asr.image.pullPolicy=Always \
+            --set parser.image.repository=${{ env.PARSER_IMAGE }} \
+            --set parser.image.tag=${{ needs.generate-tag.outputs.tag }} \
+            --set parser.image.pullPolicy=Always \
             --set public.host=${{ env.PUBLIC_HOST }} \
             --set public.scheme=${{ env.PUBLIC_SCHEME }} \
-            --wait --timeout 10m
+            --wait --timeout 15m
 
       # 等待所有 Deployment 完成滾動更新
       - name: Wait for rollouts
@@ -364,6 +453,8 @@ jobs:
           kubectl rollout status deployment/care-backend -n "$KUBE_NAMESPACE" --timeout=5m
           kubectl rollout status deployment/care-frontend -n "$KUBE_NAMESPACE" --timeout=5m
           kubectl rollout status deployment/care-n8n -n "$KUBE_NAMESPACE" --timeout=5m
+          kubectl rollout status deployment/care-asr -n "$KUBE_NAMESPACE" --timeout=5m
+          kubectl rollout status deployment/care-parser -n "$KUBE_NAMESPACE" --timeout=5m
 
       # 輸出部署資訊
       - name: Print deployment info
