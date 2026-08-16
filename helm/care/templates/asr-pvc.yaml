@@ -1,4 +1,4 @@
-{{- if .Values.asr.persistence.enabled }}
+{{- if and .Values.asr.enabled .Values.asr.persistence.enabled }}
 {{- /*
   Whisper 模型於第一次 /transcribe 請求時才由 HuggingFace 下載（約 500MB）。
   沒有這個 PVC 的話，每次 pod 重啟都要重抓一次，首個語音訊息會直接撞上逾時。

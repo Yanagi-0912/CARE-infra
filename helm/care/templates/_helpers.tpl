@@ -31,6 +31,11 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 app: {{ .Values.backend.name }}
 {{- end }}
 
+{{- define "care.scheduler.labels" -}}
+{{ include "care.labels" . }}
+app: {{ .Values.scheduler.name }}
+{{- end }}
+
 {{- define "care.frontend.labels" -}}
 {{ include "care.labels" . }}
 app: {{ .Values.frontend.name }}

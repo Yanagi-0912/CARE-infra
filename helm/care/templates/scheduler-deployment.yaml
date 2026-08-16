@@ -1,0 +1,96 @@
+{{- if .Values.scheduler.enabled }}
+# 背景排程器（用藥提醒、每日諮詢摘要）獨立於 backend 的 Deployment。
+#
+# 為什麼要拆：排程器原本是 backend lifespan 裡的 asyncio task，與 API 共用同一個
+# 事件迴圈與 pod 生命週期。因此 API 的每一次重新部署、OOM 或崩潰都會連帶重啟
+# 排程器，而 medication-reminders 規格明訂「錯過時段不補推播」——重啟若橫跨某個
+# 服藥時段，那個時段就永久錯過。拆開後改 API 不再影響提醒的準時性。
+#
+# 沒有對應的 Service：本 Deployment 不接受外部流量，Ingress 也不指向它。仍然跑
+# uvicorn 只是為了讓 /health 的 readinessProbe 沿用 backend 既有設定，不必為它
+# 另外設計一套健康檢查機制。
+#
+# 注意：拆開**不代表**永遠只有一個排程器實例。下面的滾動更新策略與 backend 相同
+# （maxUnavailable: 0 / maxSurge: 1，先起新的、ready 後才關舊的），每次部署都必然
+# 有一段時間兩個實例並存。medication-reminders 既有的原子搶佔與
+# (reminder_id, scheduled_at) 唯一索引仍然是必要的，不得因為「現在只有一個 pod」
+# 而移除。
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Values.scheduler.name }}
+  namespace: {{ include "care.namespace" . }}
+  labels:
+    {{- include "care.scheduler.labels" . | nindent 4 }}
+spec:
+  # 刻意不提供 replicaCount：排程器沒有水平擴充的意義，多開只是讓更多實例去
+  # 爭搶同一批推播權。要提高吞吐應該調 check_interval，不是加 replica。
+  replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app: {{ .Values.scheduler.name }}
+  template:
+    metadata:
+      labels:
+        app: {{ .Values.scheduler.name }}
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: {{ .Values.scheduler.name }}
+          # 與 backend 共用同一個 image，只靠 APP_ROLE 區分行為。不另外建 image
+          # 可以確保兩者的程式碼版本永遠一致——排程器讀的資料模型與 API 寫的
+          # 必須同步，版本漂移會產生極難查的問題。
+          image: "{{ .Values.backend.image.repository }}:{{ .Values.backend.image.tag }}"
+          imagePullPolicy: {{ .Values.backend.image.pullPolicy }}
+          ports:
+            - containerPort: {{ .Values.backend.service.port }}
+          # 啟動探針：import app.main 會建藥證庫的 n-gram 索引（實測 2.2s，
+          # 受 cpu limit 節流後約 4.5s）。有 startupProbe 才能給啟動一段寬鬆的
+          # 預算，同時讓 liveness 維持嚴格——沒有它就得把 liveness 的
+          # initialDelay 調到涵蓋最慢啟動，之後真的掛掉也要等那麼久才被發現。
+          # 預算：3s × 20 = 60s。
+          startupProbe:
+            httpGet:
+              path: /health
+              port: {{ .Values.backend.service.port }}
+            periodSeconds: 3
+            failureThreshold: 20
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: {{ .Values.backend.service.port }}
+            periodSeconds: 5
+            failureThreshold: 3
+          # 存活探針指向 /health/scheduler 而不是 /health：後者只證明 uvicorn
+          # 還能回應 HTTP。排程器是事件迴圈上的一個 asyncio task，它整個停掉時
+          # uvicorn 依然健康、/health 回 200，探針完全看不出異常——而用藥提醒
+          # 已經停止推播，且錯過的時段不會補推。
+          #
+          # 時間預算：/health/scheduler 在用藥提醒連續 180 秒（60s 間隔 × 3 倍
+          # 容忍）沒有心跳後才回 503，這裡再要求連續 4 次失敗（30s × 4 = 120s），
+          # 因此從真正停擺到重啟約 5 分鐘。刻意保守——重啟期間錯過的服藥時段
+          # 不會補推，誤判重啟的代價比晚幾分鐘發現更高。
+          livenessProbe:
+            httpGet:
+              path: /health/scheduler
+              port: {{ .Values.backend.service.port }}
+            periodSeconds: 30
+            failureThreshold: 4
+          resources:
+            {{- toYaml .Values.scheduler.resources | nindent 12 }}
+          envFrom:
+            - configMapRef:
+                name: care-backend-config
+            - secretRef:
+                name: {{ .Values.secret.name }}
+          # env 的優先序高於 envFrom，因此這裡會覆蓋 configmap 裡的同名值。
+          # 兩個 Deployment 共用同一份 configmap，角色只能在這裡區分。
+          env:
+            - name: APP_ROLE
+              value: "scheduler"
+{{- end }}

@@ -41,3 +41,11 @@ spec:
                 name: care-backend-config
             - secretRef:
                 name: {{ .Values.secret.name }}
+          # 角色與 scheduler Deployment 是否存在綁定，不能各自獨立設定：
+          # 有獨立的排程器 pod 時，backend 只服務請求（api）；沒有的時候
+          # backend 必須自己跑排程（all），否則整個系統沒有任何行程在推播，
+          # 而用藥提醒錯過的時段不會補推，漏掉就是永久漏掉。
+          # env 的優先序高於上面的 envFrom，因此這裡會覆蓋 configmap 的同名值。
+          env:
+            - name: APP_ROLE
+              value: {{ if .Values.scheduler.enabled }}"api"{{ else }}"all"{{ end }}

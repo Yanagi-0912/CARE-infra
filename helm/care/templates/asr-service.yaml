@@ -1,3 +1,4 @@
+{{- if .Values.asr.enabled }}
 {{- /*
   Service 名稱刻意維持 local-asr，與 CARE-n8n/docker-compose.yml 的服務名一致，
   這樣 n8n workflow 內的 http://local-asr:8200/transcribe 不用改就能在叢集內解析。
@@ -17,3 +18,4 @@ spec:
     - name: http
       port: {{ .Values.asr.service.port }}
       targetPort: {{ .Values.asr.port }}
+{{- end }}

@@ -1,3 +1,4 @@
+{{- if .Values.parser.enabled }}
 {{- /*
   同 local-asr：Service 名稱對齊 docker-compose 的服務名，
   n8n workflow 內的 http://local-parser:8100/parse 不需改動。
@@ -17,3 +18,4 @@ spec:
     - name: http
       port: {{ .Values.parser.service.port }}
       targetPort: {{ .Values.parser.port }}
+{{- end }}
