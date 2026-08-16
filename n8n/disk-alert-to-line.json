@@ -1,0 +1,78 @@
+{
+  "name": "CARE VM 磁碟告警 → LINE",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "disk-alert",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "b1a7c0de-0001-4000-8000-000000000001",
+      "name": "Webhook - Disk Alert",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [-220, 0],
+      "webhookId": "b1a7c0de-0001-4000-8000-000000000001"
+    },
+    {
+      "parameters": {
+        "jsCode": "// 由 VM 上的 vm-disk-guard.sh POST 過來的告警。\n// 送出的 JSON 形狀：{ source, host, level, disk_pct, message }\n//\n// ↓↓↓ 唯一需要你手動填的東西：收件的 LINE user ID（U 開頭）或群組 ID（C 開頭）↓↓↓\nconst LINE_TO = 'REPLACE_WITH_YOUR_LINE_USER_OR_GROUP_ID';\n\nconst a = $json.body ?? $json;\nconst level = String(a.level || 'info').toUpperCase();\n\n// crit = 已在自動回收或回收失敗；warning = 只是超過水位；notice = 已恢復\nconst icon = { CRIT: '🔴', WARNING: '🟡', NOTICE: '🟢' }[level] || 'ℹ️';\n\nconst text = [\n  `${icon} CARE VM 磁碟告警`,\n  '',\n  `等級：${level}`,\n  `主機：${a.host || 'unknown'}`,\n  `使用率：${a.disk_pct ?? '?'}%`,\n  '',\n  a.message || '',\n].join('\\n');\n\nreturn [{ json: { to: LINE_TO, messages: [{ type: 'text', text }] } }];"
+      },
+      "id": "b1a7c0de-0002-4000-8000-000000000002",
+      "name": "Format Alert",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [0, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.line.me/v2/bot/message/push",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ to: $json.to, messages: $json.messages }) }}",
+        "options": {}
+      },
+      "id": "b1a7c0de-0003-4000-8000-000000000003",
+      "name": "LINE Push",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [220, 0]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ status: 'sent' }) }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "b1a7c0de-0004-4000-8000-000000000004",
+      "name": "Respond - Sent",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [440, 0]
+    }
+  ],
+  "connections": {
+    "Webhook - Disk Alert": {
+      "main": [[{ "node": "Format Alert", "type": "main", "index": 0 }]]
+    },
+    "Format Alert": {
+      "main": [[{ "node": "LINE Push", "type": "main", "index": 0 }]]
+    },
+    "LINE Push": {
+      "main": [[{ "node": "Respond - Sent", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {},
+  "meta": {},
+  "tags": []
+}

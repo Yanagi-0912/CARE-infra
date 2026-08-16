@@ -1,0 +1,16 @@
+[Unit]
+Description=每 15 分鐘巡檢 CARE VM 磁碟水位
+Documentation=https://github.com/Yanagi-0912/CARE-infra
+
+[Timer]
+# 2026-08-10 的事故從磁碟寫滿到 Traefik 被驅逐約 15 分鐘，
+# 巡檢間隔取同一量級，確保在 kubelet 動手前至少有一次介入機會。
+OnCalendar=*:0/15
+# 開機後先等 5 分鐘，避開開機時 k3s 拉映像造成的瞬間高水位誤判
+OnBootSec=5min
+# 錯過的排程（例如 VM 關機期間）開機後補跑一次
+Persistent=true
+AccuracySec=1min
+
+[Install]
+WantedBy=timers.target

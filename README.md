@@ -6,6 +6,10 @@ CARE 應用的 **Kubernetes** 部署與 **GitHub Actions CI/CD**，使用 **Helm
 
 - `helm/care/`：Helm chart（Deployment、Service、ConfigMap、Ingress、n8n PVC 等）
 - `.github/workflows/cicd.yml`：建置映像、驗證 chart、部署到叢集
+- `scripts/vm-disk-guard.sh`：VM 磁碟守門員（見「VM 維運」）
+- `scripts/install-vm-maintenance.sh`：把守門員裝成 systemd timer
+- `systemd/`：守門員的 service / timer unit
+- `n8n/disk-alert-to-line.json`：把磁碟告警轉發到 LINE 的 n8n workflow
 
 ## 前置需求
 
@@ -156,6 +160,150 @@ helm upgrade --install care ./helm/care \
 ```
 
 `ingress.className` 已預設 `traefik`，通常不必再加 `--set`。
+
+## VM 維運（磁碟守門員）
+
+### 為什麼需要
+
+2026-08-10 曾發生一次全站 502。成因鏈：
+
+1. VM 上手動 `docker compose build` CARE-n8n stack，build cache 累積到 **13.8G**（單筆 whisper ASR build 就 9.8G）
+2. `/` 被塞到 **100%**
+3. kubelet 觸發 **DiskPressure**，替節點打上 `node.kubernetes.io/disk-pressure:NoSchedule`
+4. **Traefik 與所有 care-dev pod 被驅逐**
+5. Traefik 沒有 endpoint → svclb 的 iptables 無轉發目標 → VM `:80` REJECT
+6. Cloudflare Tunnel 連 origin 被拒 → **502**
+
+關鍵是 K3s VM 上有**兩套獨立的 containerd**，清理時別搞混：
+
+| 路徑 | 屬於 | socket | 清理指令 |
+|------|------|--------|----------|
+| `/var/lib/rancher/k3s/agent/containerd` | k3s | `/run/k3s/containerd/containerd.sock` | `k3s crictl rmi --prune` |
+| `/var/lib/containerd` | Docker | `/run/containerd/containerd.sock` | `docker builder prune` / `docker image prune` |
+
+清 Docker 那側**不影響 k3s 叢集**。
+
+### 為什麼這件事 CI/CD 做不到
+
+CI/CD 管的是**叢集裡的東西**（`helm upgrade` 部署 Deployment、Service、Ingress）。守門員是**主機層的東西**：systemd unit、`/usr/local/sbin/`、`/etc/care/`。
+
+它必須活在 k8s 外面，因為它要處理的正是「k8s 自己因磁碟滿而癱瘓」的情況 —— 裝進叢集裡就會跟 Traefik 一起被 kubelet 驅逐，需要它的時候剛好不在。
+
+所以這是**一次性的主機 bootstrap**，跟當初手動跑 `setup-self-hosted-runner.sh` 同一類。裝完之後 systemd timer 自動運作，CI 也會在每次部署時呼叫它回收空間、並檢查 VM 上的版本有沒有跟 repo 脫節。
+
+### 安裝
+
+一行搞定（**建議**，含 kubeconfig 修復與 CI 授權）：
+
+```bash
+sudo bash scripts/install-vm-maintenance.sh --fix-kubeconfig --enable-ci-sudo
+```
+
+之後補上告警管道（見「告警轉發到 LINE」取得 webhook URL）：
+
+```bash
+sudo bash scripts/install-vm-maintenance.sh \
+  --fix-kubeconfig --enable-ci-sudo \
+  --webhook http://localhost:5678/webhook/disk-alert
+```
+
+腳本可重複執行，重跑就是更新。
+
+| 選項 | 作用 |
+|------|------|
+| `--fix-kubeconfig` | 修好 k3s.yaml 權限，並重啟 CI runner 服務套用群組變更 |
+| `--enable-ci-sudo` | 讓 CI 的 deploy job 免密碼執行守門員 |
+| `--ci-user NAME` | CI runner 跑在哪個使用者下，預設為執行 sudo 的本人 |
+| `--webhook URL` | 告警要 POST 到哪裡 |
+| `--uninstall` | 移除所有安裝的內容 |
+
+> 本 VM 的 self-hosted runner 跑在 **`care`** 使用者下（不是 `setup-self-hosted-runner.sh` 預設的 `github-runner`），所以直接用 `sudo` 執行即可，不必額外指定 `--ci-user`。
+
+### CI 授權的界線
+
+`--enable-ci-sudo` 寫入 `/etc/sudoers.d/care-vm-maintenance`，**只授權執行 `/usr/local/sbin/vm-disk-guard.sh` 這一件事**，不是全面 NOPASSWD。
+
+授權對象刻意指向已安裝的固定路徑，而不是 repo 裡的腳本 —— 後者每次 CI 都會被 checkout 覆寫，授權它等於把 VM 的 root 交給任何能 push 到 main 的人。
+
+同理，CI **不會自動更新守門員本身**，只在版本與 repo 不一致時發出 warning，由你手動重跑安裝腳本。
+
+裝好後有兩個 timer：
+
+| Timer | 頻率 | 行為 |
+|-------|------|------|
+| `care-disk-guard.timer` | 每 15 分鐘 | 超過 80% 告警；超過 85% 分級回收（build cache → 未用映像 → k3s 映像），每級做完重新量測，夠了就停手 |
+| `care-docker-prune.timer` | 每日 04:00 | 清掉超過 48 小時的 build cache，近期的保留讓 build 仍有快取可用 |
+
+門檻對齊 kubelet 的行為，刻意留出反應餘裕：
+
+- **85%** — kubelet 映像 GC 的 `HighThresholdPercent` 預設值
+- **90%** — kubelet 驅逐門檻 `nodefs.available<10%`（即上述事故）
+
+守門員設在 85% 動手，目的是在 kubelet 自己開始驅逐 pod 之前就把空間收回來。
+
+### 告警轉發到 LINE
+
+守門員預設只寫 journal，**沒人會主動去看**。設定 `CARE_ALERT_WEBHOOK` 後它會 POST 這樣的 JSON：
+
+```json
+{ "source": "care-disk-guard", "host": "care", "level": "crit", "disk_pct": 87, "message": "..." }
+```
+
+`n8n/disk-alert-to-line.json` 是現成的接收端（Webhook → 格式化 → LINE Push → 回應）。
+
+**要送到哪個 n8n？用 Docker 那個（`localhost:5678`），不要用 k8s 裡的。**
+理由：這則告警的用途正是「叢集快掛了」。k8s 裡的 n8n 會跟 Traefik 一起被 kubelet 驅逐 —— 用它當告警管道，等於在火災時把警報器接在燒起來的房間裡。Docker 那套不歸 kubelet 管，能在驅逐事件中存活。
+
+設定步驟：
+
+1. n8n → Credentials → 新增 **Header Auth**，Name 填 `Authorization`，Value 填 `Bearer <LINE_CHANNEL_ACCESS_TOKEN>`
+2. 匯入 `n8n/disk-alert-to-line.json`
+3. 編輯 **Format Alert** 節點，把 `LINE_TO` 換成你的 LINE user ID（`U` 開頭）或群組 ID（`C` 開頭）
+4. 在 **LINE Push** 節點選擇步驟 1 建立的 credential
+5. 啟用 workflow，取得 webhook URL
+6. 用該 URL 重跑安裝腳本的 `--webhook`
+
+### 告警頻率
+
+巡檢每 15 分鐘一次，若磁碟長期停在警戒線上會重複觸發。守門員的規則：
+
+- **等級改變一定送** —— 升壓（warning → crit）或恢復都值得立刻知道
+- **等級沒變則受冷卻限制** —— 預設 6 小時（`DISK_GUARD_COOLDOWN_MIN`）
+- **恢復時送一則 notice** —— 沒有這則，收到告警的人無從得知問題已解決
+- **journal 一律留完整紀錄** —— 冷卻只作用在對外通知，不影響 `journalctl -t care-disk-guard`
+
+狀態記在 `/var/lib/care/disk-guard.state`。
+
+### 常用指令
+
+```bash
+sudo /usr/local/sbin/vm-disk-guard.sh status   # 只看狀態，不做任何變更
+sudo /usr/local/sbin/vm-disk-guard.sh check    # 手動跑一次巡檢
+journalctl -t care-disk-guard -n 50            # 看歷史紀錄
+systemctl list-timers 'care-*'                 # 確認排程
+
+sudo bash scripts/install-vm-maintenance.sh --uninstall
+```
+
+設定放在 `/etc/care/disk-guard.env`，改完不必重載 systemd，下次觸發即生效。
+
+### kubeconfig 權限（`--fix-kubeconfig`）
+
+k3s **每次啟動**都會把 `/etc/rancher/k3s/k3s.yaml` 重寫為 `0600 root:root`。這會同時擋住兩者：
+
+- 一般使用者的 `kubectl`
+- CI deploy job 的 `[ -r /etc/rancher/k3s/k3s.yaml ]` 測試 —— 測試失敗會退回 `KUBE_CONFIG_DATA` secret，**若該 secret 未設定則部署直接失敗**
+
+`--fix-kubeconfig` 會建立 `k3s` 群組、把當前使用者與 `github-runner` 加進去，並寫入 `/etc/rancher/k3s/config.yaml`：
+
+```yaml
+write-kubeconfig-group: "k3s"
+write-kubeconfig-mode: "0640"
+```
+
+這樣 k3s 重啟後仍以 `0640 root:k3s` 寫出 kubeconfig。比 `chmod 644` 安全 —— cluster-admin 憑證不會變成全機器可讀。群組變更需重新登入才會對現有 shell 生效。
+
+> `kubectl` 在 VM 上是 k3s 的 symlink，`KUBECONFIG` 為空時會**寫死回退**到 `/etc/rancher/k3s/k3s.yaml`。所以用家目錄的 kubeconfig 時必須明確 `export KUBECONFIG=$HOME/.kube/config`，`unset KUBECONFIG` 沒有用。
 
 ## Docker Hub 映像
 

@@ -1,0 +1,16 @@
+[Unit]
+# 磁碟水位巡檢：超過 CRIT 門檻時分級回收空間，避免走到 kubelet 驅逐 pod 那一步
+Documentation=https://github.com/Yanagi-0912/CARE-infra
+After=docker.service k3s.service
+Wants=docker.service
+
+[Service]
+Type=oneshot
+# 需要 root：docker.sock 與 k3s crictl 都要
+User=root
+EnvironmentFile=-/etc/care/disk-guard.env
+ExecStart=/usr/local/sbin/vm-disk-guard.sh check
+
+# 巡檢本身不該把磁碟壓力變得更糟，限制資源佔用
+Nice=10
+IOSchedulingClass=idle
