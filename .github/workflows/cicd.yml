@@ -357,9 +357,13 @@ jobs:
       - generate-tag      # 需要映像標籤
       - build-backend     # 需要後端映像
       - build-frontend    # 需要前端映像
-      - build-asr         # 需要 ASR 映像
-      - build-parser      # 需要 Parser 映像
       - validate          # 需要驗證通過
+      # build-asr / build-parser 刻意不列入。這兩個服務由 values.yaml 的
+      # asr.enabled / parser.enabled 控制，目前為 false（仍在開發中，不部署），
+      # 因此部署根本用不到它們的映像。把它們留在 needs 的話，那邊一個還沒寫完
+      # 的 commit 就會讓 backend 與 frontend 的部署整個停擺。
+      # 兩個 build job 仍會照跑（讓映像保持最新），只是不再阻擋部署。
+      # 之後要啟用 asr/parser 時，記得把它們加回這裡。
     # 僅 push main 或手動觸發時部署
     if: github.event_name == 'workflow_dispatch' || github.event_name == 'repository_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
     runs-on: [self-hosted, Linux, care-k3s]
@@ -393,6 +397,22 @@ jobs:
 
       - name: Verify cluster connection
         run: kubectl cluster-info
+
+      # 部署前先確認磁碟餘裕。
+      # 2026-08-10 事故：VM 磁碟寫滿 → kubelet 觸發 DiskPressure → 驅逐 Traefik
+      # → 對外 502。與其把新版本部署到一個注定被驅逐的節點，不如在這裡提早失敗。
+      - name: Preflight - 檢查節點磁碟餘裕
+        run: |
+          USED=$(df -P / | awk 'NR==2 { gsub(/%/, "", $5); print $5 }')
+          echo "節點磁碟使用率：${USED}%"
+          # 90% 對應 kubelet 的 nodefs.available<10% 驅逐門檻
+          if [ "$USED" -ge 90 ]; then
+            echo "::error::磁碟使用率 ${USED}% 已達 kubelet 驅逐門檻，中止部署。請先在 VM 執行 sudo /usr/local/sbin/vm-disk-guard.sh check"
+            exit 1
+          fi
+          if [ "$USED" -ge 80 ]; then
+            echo "::warning::磁碟使用率 ${USED}% 已超過警戒水位，請確認 care-disk-guard.timer 正常運作"
+          fi
 
       - name: Create k8s Secret
         env:
@@ -450,11 +470,25 @@ jobs:
           # kubectl rollout status：監控 Deployment 的滾動更新進度
           # --timeout=5m：如果 5 分鐘內沒完成則失敗
           # 防止部署卡住，確保部署及時完成
-          kubectl rollout status deployment/care-backend -n "$KUBE_NAMESPACE" --timeout=5m
-          kubectl rollout status deployment/care-frontend -n "$KUBE_NAMESPACE" --timeout=5m
-          kubectl rollout status deployment/care-n8n -n "$KUBE_NAMESPACE" --timeout=5m
-          kubectl rollout status deployment/care-asr -n "$KUBE_NAMESPACE" --timeout=5m
-          kubectl rollout status deployment/care-parser -n "$KUBE_NAMESPACE" --timeout=5m
+          # 一定存在的四個。care-scheduler 是背景排程器（用藥提醒、每日諮詢
+          # 摘要），與 backend 共用同一個映像、以 APP_ROLE 區分角色。它必須列在
+          # 這裡：backend 一旦轉成 APP_ROLE=api 就不再自己跑排程，若 scheduler
+          # 沒起來而部署卻回報成功，用藥提醒會靜靜停擺，而錯過的時段不補推播。
+          for d in care-backend care-frontend care-n8n care-scheduler; do
+            kubectl rollout status "deployment/$d" -n "$KUBE_NAMESPACE" --timeout=5m
+          done
+
+          # care-asr / care-parser 由 values.yaml 的 asr.enabled / parser.enabled
+          # 控制，目前為 false（服務仍在開發中，尚未部署）。存在才等待——直接
+          # 無條件 rollout status 會在 Deployment 不存在時失敗，把整個部署判成
+          # 失敗，即使 backend 其實已經更新成功。
+          for d in care-asr care-parser; do
+            if kubectl get "deployment/$d" -n "$KUBE_NAMESPACE" >/dev/null 2>&1; then
+              kubectl rollout status "deployment/$d" -n "$KUBE_NAMESPACE" --timeout=5m
+            else
+              echo "跳過 $d：未部署（helm values 中已停用）"
+            fi
+          done
 
       # 輸出部署資訊
       - name: Print deployment info
@@ -464,3 +498,32 @@ jobs:
           echo "Services:"
           # 列出所有建立的 Service，驗證部署成功
           kubectl get svc -n "$KUBE_NAMESPACE"
+
+      # 每次部署都用新的映像 tag，舊 tag 會留在 k3s 的 containerd 裡持續累積。
+      # kubelet 的映像 GC 要到 85% 才啟動，等它動手時節點已經很接近驅逐門檻，
+      # 所以部署成功後主動回收一次，讓水位維持在安全區。
+      # 這一步失敗不影響部署結果 —— 部署已經成功，回收只是衛生工作。
+      - name: Post-deploy - 回收空間並檢查守門員
+        if: success()
+        continue-on-error: true
+        run: |
+          GUARD=/usr/local/sbin/vm-disk-guard.sh
+          BEFORE=$(df -P / | awk 'NR==2 { gsub(/%/, "", $5); print $5 }')
+
+          if [ ! -x "$GUARD" ]; then
+            echo "::warning::VM 尚未安裝磁碟守門員，略過回收。請在 VM 執行：sudo bash scripts/install-vm-maintenance.sh --fix-kubeconfig --enable-ci-sudo"
+          elif sudo -n "$GUARD" check; then
+            echo "守門員巡檢完成"
+          else
+            echo "::warning::無法免密碼執行守門員。請在 VM 重跑安裝腳本並加上 --enable-ci-sudo"
+          fi
+
+          # 守門員是主機層元件，不由 helm 部署，所以可能與 repo 版本脫節。
+          # 這裡只告警不自動更新 —— 自動更新需要 root 執行 repo 裡的檔案，
+          # 等於把 VM 的 root 交給任何能 push 到 main 的人。
+          if [ -x "$GUARD" ] && ! cmp -s scripts/vm-disk-guard.sh "$GUARD"; then
+            echo "::warning::VM 上的守門員與 repo 版本不一致，請重跑：sudo bash scripts/install-vm-maintenance.sh"
+          fi
+
+          AFTER=$(df -P / | awk 'NR==2 { gsub(/%/, "", $5); print $5 }')
+          echo "磁碟使用率：${BEFORE}% -> ${AFTER}%"
