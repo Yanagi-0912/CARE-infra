@@ -1,0 +1,12 @@
+[Unit]
+Description=每日回收 CARE VM 的 Docker build cache
+Documentation=https://github.com/Yanagi-0912/CARE-infra
+
+[Timer]
+OnCalendar=*-*-* 04:00:00
+# 避免與其他排程在同一秒撞在一起
+RandomizedDelaySec=15min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

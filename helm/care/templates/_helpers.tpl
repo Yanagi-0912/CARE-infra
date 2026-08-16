@@ -31,6 +31,11 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 app: {{ .Values.backend.name }}
 {{- end }}
 
+{{- define "care.scheduler.labels" -}}
+{{ include "care.labels" . }}
+app: {{ .Values.scheduler.name }}
+{{- end }}
+
 {{- define "care.frontend.labels" -}}
 {{ include "care.labels" . }}
 app: {{ .Values.frontend.name }}
@@ -39,6 +44,16 @@ app: {{ .Values.frontend.name }}
 {{- define "care.n8n.labels" -}}
 {{ include "care.labels" . }}
 app: n8n
+{{- end }}
+
+{{- define "care.asr.labels" -}}
+{{ include "care.labels" . }}
+app: local-asr
+{{- end }}
+
+{{- define "care.parser.labels" -}}
+{{ include "care.labels" . }}
+app: local-parser
 {{- end }}
 
 {{- define "care.publicOrigin" -}}

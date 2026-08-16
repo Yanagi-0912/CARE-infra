@@ -52,6 +52,10 @@ env:
   BACKEND_REF: main                        # 部署永遠取 main 最新
   FRONTEND_REF: main
   N8N_IMAGE: n8nio/n8n                      # n8n 官方映像（通常不改）
+  ASR_IMAGE: yanagi0912/care-asr           # 語音轉文字映像（faster-whisper）
+  PARSER_IMAGE: yanagi0912/care-parser     # 文件解析映像
+  N8N_STACK_REPO: Yanagi-0912/CARE-n8n     # local_asr / local_parser 原始碼 repo
+  N8N_STACK_REF: main
   PUBLIC_HOST: care.jamessu2016.com         # Cloudflare Tunnel 對外網域（soselab 轉發完成後可改回 care.soselab.tw）
   PUBLIC_SCHEME: https
   VITE_API_BASE_URL: https://care.jamessu2016.com
@@ -217,6 +221,81 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+  # 工作 3.5：構建 n8n stack 的下游服務映像（ASR / Parser）
+  #
+  # 背景：
+  #   這兩個服務原本只存在於 CARE-n8n 的 docker-compose，上雲時被漏掉，
+  #   導致 n8n workflow 呼叫不到下游、webhook 回空 body、所有多媒體訊息失效。
+  #
+  # 與後端／前端的差異：
+  #   - 原始碼在 CARE-n8n repo，且 Dockerfile 位於子目錄（local_asr / local_parser）
+  #   - ASR 映像較大（faster-whisper + ctranslate2），build 時間明顯較長
+  #   - Whisper 模型不打包進映像，改由 runtime 下載並存到 PVC
+
+  build-asr:
+    needs: generate-tag
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'repository_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    steps:
+      - name: Checkout n8n stack
+        uses: actions/checkout@v5
+        with:
+          repository: ${{ env.N8N_STACK_REPO }}
+          path: CARE-n8n
+          ref: ${{ env.N8N_STACK_REF }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v4
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push ASR
+        uses: docker/build-push-action@v7
+        with:
+          context: ./CARE-n8n/local_asr
+          push: true
+          tags: |
+            ${{ env.ASR_IMAGE }}:${{ needs.generate-tag.outputs.tag }}
+            ${{ env.ASR_IMAGE }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  build-parser:
+    needs: generate-tag
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'repository_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    steps:
+      - name: Checkout n8n stack
+        uses: actions/checkout@v5
+        with:
+          repository: ${{ env.N8N_STACK_REPO }}
+          path: CARE-n8n
+          ref: ${{ env.N8N_STACK_REF }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v4
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push Parser
+        uses: docker/build-push-action@v7
+        with:
+          context: ./CARE-n8n/local_parser
+          push: true
+          tags: |
+            ${{ env.PARSER_IMAGE }}:${{ needs.generate-tag.outputs.tag }}
+            ${{ env.PARSER_IMAGE }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
   # 工作 4：驗證 Kubernetes 資源配置
   # 
   # 目的：確保 Helm chart 渲染結果有效，早期發現配置問題
@@ -246,6 +325,8 @@ jobs:
             --namespace "${{ env.KUBE_NAMESPACE }}" \
             --set backend.image.tag=ci-validate \
             --set frontend.image.tag=ci-validate \
+            --set asr.image.tag=ci-validate \
+            --set parser.image.tag=ci-validate \
             > rendered.yaml
           test -s rendered.yaml
           curl -fsSL "https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz" | tar xz
@@ -277,6 +358,12 @@ jobs:
       - build-backend     # 需要後端映像
       - build-frontend    # 需要前端映像
       - validate          # 需要驗證通過
+      # build-asr / build-parser 刻意不列入。這兩個服務由 values.yaml 的
+      # asr.enabled / parser.enabled 控制，目前為 false（仍在開發中，不部署），
+      # 因此部署根本用不到它們的映像。把它們留在 needs 的話，那邊一個還沒寫完
+      # 的 commit 就會讓 backend 與 frontend 的部署整個停擺。
+      # 兩個 build job 仍會照跑（讓映像保持最新），只是不再阻擋部署。
+      # 之後要啟用 asr/parser 時，記得把它們加回這裡。
     # 僅 push main 或手動觸發時部署
     if: github.event_name == 'workflow_dispatch' || github.event_name == 'repository_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
     runs-on: [self-hosted, Linux, care-k3s]
@@ -310,6 +397,22 @@ jobs:
 
       - name: Verify cluster connection
         run: kubectl cluster-info
+
+      # 部署前先確認磁碟餘裕。
+      # 2026-08-10 事故：VM 磁碟寫滿 → kubelet 觸發 DiskPressure → 驅逐 Traefik
+      # → 對外 502。與其把新版本部署到一個注定被驅逐的節點，不如在這裡提早失敗。
+      - name: Preflight - 檢查節點磁碟餘裕
+        run: |
+          USED=$(df -P / | awk 'NR==2 { gsub(/%/, "", $5); print $5 }')
+          echo "節點磁碟使用率：${USED}%"
+          # 90% 對應 kubelet 的 nodefs.available<10% 驅逐門檻
+          if [ "$USED" -ge 90 ]; then
+            echo "::error::磁碟使用率 ${USED}% 已達 kubelet 驅逐門檻，中止部署。請先在 VM 執行 sudo /usr/local/sbin/vm-disk-guard.sh check"
+            exit 1
+          fi
+          if [ "$USED" -ge 80 ]; then
+            echo "::warning::磁碟使用率 ${USED}% 已超過警戒水位，請確認 care-disk-guard.timer 正常運作"
+          fi
 
       - name: Create k8s Secret
         env:
@@ -351,9 +454,15 @@ jobs:
             --set frontend.image.repository=${{ env.FRONTEND_IMAGE }} \
             --set frontend.image.tag=${{ needs.generate-tag.outputs.tag }} \
             --set frontend.image.pullPolicy=Always \
+            --set asr.image.repository=${{ env.ASR_IMAGE }} \
+            --set asr.image.tag=${{ needs.generate-tag.outputs.tag }} \
+            --set asr.image.pullPolicy=Always \
+            --set parser.image.repository=${{ env.PARSER_IMAGE }} \
+            --set parser.image.tag=${{ needs.generate-tag.outputs.tag }} \
+            --set parser.image.pullPolicy=Always \
             --set public.host=${{ env.PUBLIC_HOST }} \
             --set public.scheme=${{ env.PUBLIC_SCHEME }} \
-            --wait --timeout 10m
+            --wait --timeout 15m
 
       # 等待所有 Deployment 完成滾動更新
       - name: Wait for rollouts
@@ -361,9 +470,25 @@ jobs:
           # kubectl rollout status：監控 Deployment 的滾動更新進度
           # --timeout=5m：如果 5 分鐘內沒完成則失敗
           # 防止部署卡住，確保部署及時完成
-          kubectl rollout status deployment/care-backend -n "$KUBE_NAMESPACE" --timeout=5m
-          kubectl rollout status deployment/care-frontend -n "$KUBE_NAMESPACE" --timeout=5m
-          kubectl rollout status deployment/care-n8n -n "$KUBE_NAMESPACE" --timeout=5m
+          # 一定存在的四個。care-scheduler 是背景排程器（用藥提醒、每日諮詢
+          # 摘要），與 backend 共用同一個映像、以 APP_ROLE 區分角色。它必須列在
+          # 這裡：backend 一旦轉成 APP_ROLE=api 就不再自己跑排程，若 scheduler
+          # 沒起來而部署卻回報成功，用藥提醒會靜靜停擺，而錯過的時段不補推播。
+          for d in care-backend care-frontend care-n8n care-scheduler; do
+            kubectl rollout status "deployment/$d" -n "$KUBE_NAMESPACE" --timeout=5m
+          done
+
+          # care-asr / care-parser 由 values.yaml 的 asr.enabled / parser.enabled
+          # 控制，目前為 false（服務仍在開發中，尚未部署）。存在才等待——直接
+          # 無條件 rollout status 會在 Deployment 不存在時失敗，把整個部署判成
+          # 失敗，即使 backend 其實已經更新成功。
+          for d in care-asr care-parser; do
+            if kubectl get "deployment/$d" -n "$KUBE_NAMESPACE" >/dev/null 2>&1; then
+              kubectl rollout status "deployment/$d" -n "$KUBE_NAMESPACE" --timeout=5m
+            else
+              echo "跳過 $d：未部署（helm values 中已停用）"
+            fi
+          done
 
       # 輸出部署資訊
       - name: Print deployment info
@@ -373,3 +498,32 @@ jobs:
           echo "Services:"
           # 列出所有建立的 Service，驗證部署成功
           kubectl get svc -n "$KUBE_NAMESPACE"
+
+      # 每次部署都用新的映像 tag，舊 tag 會留在 k3s 的 containerd 裡持續累積。
+      # kubelet 的映像 GC 要到 85% 才啟動，等它動手時節點已經很接近驅逐門檻，
+      # 所以部署成功後主動回收一次，讓水位維持在安全區。
+      # 這一步失敗不影響部署結果 —— 部署已經成功，回收只是衛生工作。
+      - name: Post-deploy - 回收空間並檢查守門員
+        if: success()
+        continue-on-error: true
+        run: |
+          GUARD=/usr/local/sbin/vm-disk-guard.sh
+          BEFORE=$(df -P / | awk 'NR==2 { gsub(/%/, "", $5); print $5 }')
+
+          if [ ! -x "$GUARD" ]; then
+            echo "::warning::VM 尚未安裝磁碟守門員，略過回收。請在 VM 執行：sudo bash scripts/install-vm-maintenance.sh --fix-kubeconfig --enable-ci-sudo"
+          elif sudo -n "$GUARD" check; then
+            echo "守門員巡檢完成"
+          else
+            echo "::warning::無法免密碼執行守門員。請在 VM 重跑安裝腳本並加上 --enable-ci-sudo"
+          fi
+
+          # 守門員是主機層元件，不由 helm 部署，所以可能與 repo 版本脫節。
+          # 這裡只告警不自動更新 —— 自動更新需要 root 執行 repo 裡的檔案，
+          # 等於把 VM 的 root 交給任何能 push 到 main 的人。
+          if [ -x "$GUARD" ] && ! cmp -s scripts/vm-disk-guard.sh "$GUARD"; then
+            echo "::warning::VM 上的守門員與 repo 版本不一致，請重跑：sudo bash scripts/install-vm-maintenance.sh"
+          fi
+
+          AFTER=$(df -P / | awk 'NR==2 { gsub(/%/, "", $5); print $5 }')
+          echo "磁碟使用率：${BEFORE}% -> ${AFTER}%"

@@ -65,6 +65,61 @@ backend:
     # 預設依 public.host 組出；可在此覆寫
     CORS_ALLOW_ORIGINS: ""
 
+# 背景排程器（用藥提醒、每日諮詢摘要），與 backend 共用同一個 image。
+#
+# enabled 與 backend 的 APP_ROLE 由 backend-deployment.yaml 的模板條件綁在一起，
+# 不能各自獨立設定：
+#   true  → 建立本 Deployment（APP_ROLE=scheduler），backend 轉為 APP_ROLE=api
+#   false → 不建立本 Deployment，backend 維持 APP_ROLE=all 自己跑排程
+# 綁在一起是為了排除「兩邊都不跑排程」這個組合——用藥提醒錯過的時段不補推播，
+# 沒有任何補救路徑。
+#
+# ⚠ 從 false 切到 true 的那一次部署要挑時間。backend 換成 APP_ROLE=api 與
+# scheduler pod 變成 Ready 是兩個獨立的 reconcile，中間必然有一段沒有任何行程
+# 在跑排程的空窗（映像拉取 + 約 5 秒啟動）。若空窗剛好橫跨某個服藥時段的分鐘，
+# 那個時段就永久錯過。預設時段是 08:00 / 12:00 / 18:00 / 21:30，避開這四個
+# 時間點前後各十分鐘再執行 helm upgrade。之後的一般部署沒有這個問題——
+# 那時 backend 已經是 api，不再參與排程。
+scheduler:
+  name: care-scheduler
+  enabled: true
+  # 沒有 replicaCount：排程器不做水平擴充，多開只是讓更多實例爭搶同一批推播權。
+  # 要提高吞吐應該調 check_interval，不是加 replica。
+  resources:
+    # 這組數字來自實測，不是估的。
+    #
+    # 開發機（macOS/arm64，`APP_ROLE=scheduler python -c "import app.main"` 取
+    # ru_maxrss）：直譯器 13.8 MiB → import 後 393.2 MiB，啟動 2.24s（CPU 未受限）。
+    # 載入的是藥證庫 66,478 筆與 56,763 個 n-gram key。
+    #
+    # 線上（`kubectl top pod -n care-dev`，care-backend 閒置中）：328Mi。
+    # 以線上數字為準——Linux 容器的配置器與頁面行為和 macOS 不同，實際比開發機
+    # 低約 65 MiB。requests 取 350Mi（略高於觀測值，讓 QoS 不會在節點吃緊時
+    # 被優先驅逐），limits 與 backend 同為 512Mi。
+    #
+    # 重點：排程器 pod **並不比 backend 輕**。app/dependencies.py:354 是模組層級
+    # 載入，只要 import app.main 就會把藥證庫與 n-gram 索引整個建起來，跟角色
+    # 無關。原本以為「排程器只查 DB 和推播所以很省」是錯的，記憶體上限必須與
+    # backend 同級，設低了會在啟動當下就 OOMKilled。
+    #
+    # 這 393 MiB 對排程器而言是純粹的死重（它從不查藥證庫）。要真正省下來得把
+    # 載入改成延遲初始化，但那會把建索引的 CPU 成本搬到第一次藥袋掃描的請求上，
+    # 而那是條 async 路徑——等於製造另一個事件迴圈阻塞。不划算，維持現況。
+    #
+    # 註：量測在 macOS 上做，Linux 容器的 RSS 會有出入，上線後應以實際峰值校正。
+    requests:
+      cpu: 100m
+      memory: 350Mi
+      ephemeral-storage: 256Mi
+    limits:
+      # CPU 與 backend 同級而非更低：啟動時建 n-gram 索引是 CPU 密集的，
+      # cpu limit 是 CFS quota，設太低會等比例拉長啟動時間
+      #   500m → 約 4.5s   200m → 約 11s
+      # 而 probe 的預算有限（見 scheduler-deployment.yaml 的 startupProbe）。
+      cpu: 500m
+      memory: 512Mi
+      ephemeral-storage: 512Mi
+
 frontend:
   name: care-frontend
   replicaCount: 1
@@ -111,7 +166,71 @@ n8n:
       cpu: 1000m
       memory: 1Gi
       ephemeral-storage: 1Gi
+  # n8n-config ConfigMap：整個 n8n stack 共用（n8n / local-asr / local-parser 都 envFrom 它）
   config:
     WHISPER_MODEL: "small"
     WHISPER_COMPUTE_TYPE: "int8"
     PARSER_MAX_FILE_SIZE_MB: "20"
+
+# 語音轉文字；n8n workflow 以 http://local-asr:8200/transcribe 呼叫。
+#
+# enabled: false —— 這個服務仍在開發中，尚未部署。關閉時整組資源（Deployment /
+# Service / PVC）都不建立，n8n 的語音分支因此打不到後端，使用者傳語音會收到
+# 「無法辨識」的提示。這是已知且刻意的狀態，不是故障。
+#
+# 開啟前要注意：映像含 torch + transformers，通常 2~5GB，且首次啟動會下載
+# Breeze-ASR-26 的模型權重到 PVC。本專案有過映像堆積撐爆磁碟、觸發 kubelet
+# 驅逐的紀錄（見 cicd.yml 的映像清理說明），開啟前先確認節點磁碟餘裕。
+asr:
+  enabled: false
+  name: care-asr
+  replicaCount: 1
+  image:
+    repository: yanagi0912/care-asr
+    tag: latest
+    pullPolicy: IfNotPresent
+  service:
+    port: 8200
+  port: 8200
+  persistence:
+    # 關閉時改用 emptyDir，代價是每次 pod 重啟都重新下載 Whisper 模型
+    enabled: true
+    storageClass: local-path
+    size: 5Gi
+  resources:
+    requests:
+      # whisper small + int8 常駐約 1GB；CPU 給越多轉錄越快
+      cpu: 500m
+      memory: 1Gi
+      ephemeral-storage: 512Mi
+    limits:
+      cpu: 2000m
+      memory: 2Gi
+      ephemeral-storage: 1Gi
+
+# 文件解析（pdf / docx / xlsx / pptx / html …）；n8n workflow 以
+# http://local-parser:8100/parse 呼叫。
+#
+# enabled: false —— 同 asr，仍在開發中尚未部署。關閉時使用者上傳檔案會收到
+# 「無法辨識」的提示，且 media_handler 的文件 ingest（把解析結果存進使用者
+# 專屬 RAG 向量庫）也不會發生。
+parser:
+  enabled: false
+  name: care-parser
+  replicaCount: 1
+  image:
+    repository: yanagi0912/care-parser
+    tag: latest
+    pullPolicy: IfNotPresent
+  service:
+    port: 8100
+  port: 8100
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+      ephemeral-storage: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+      ephemeral-storage: 512Mi

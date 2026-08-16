@@ -40,6 +40,18 @@ spec:
                 name: {{ .Values.backend.name }}
                 port:
                   number: {{ .Values.backend.service.port }}
+          # 藥丸縮圖的靜態服務（app/routers/drug_appearance/images.py）。
+          # 這條路由是功能本身的一部分，不是可選的優化：LINE 伺服器會在推播
+          # 渲染當下來抓這個 URL，漏了這條就落到下面的 / 規則、拿到前端的
+          # index.html，圖片永遠載不出來（LIFF 端的 PillThumbnail 會靜靜隱藏，
+          # 版面不破，所以這個缺口不會以錯誤的形式現身，只會「沒有照片」）。
+          - path: /drug-appearance
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ .Values.backend.name }}
+                port:
+                  number: {{ .Values.backend.service.port }}
           - path: /
             pathType: Prefix
             backend:
