@@ -21,6 +21,6 @@ data:
   USER_DOCS_TTL_SECONDS: {{ .Values.backend.config.USER_DOCS_TTL_SECONDS | quote }}
   RAG_HYBRID_ENABLED: {{ .Values.backend.config.RAG_HYBRID_ENABLED | quote }}
   RAG_RRF_K: {{ .Values.backend.config.RAG_RRF_K | quote }}
-  MEDIA_PARSE_WEBHOOK_URL: {{ .Values.backend.config.MEDIA_PARSE_WEBHOOK_URL | quote }}
+  MEDIA_PARSE_WEBHOOK_URL: {{ include "care.mediaParseWebhookUrl" . | quote }}
   PUBLIC_BASE_URL: {{ include "care.publicBaseUrl" . | quote }}
   CORS_ALLOW_ORIGINS: {{ include "care.corsAllowOrigins" . | quote }}

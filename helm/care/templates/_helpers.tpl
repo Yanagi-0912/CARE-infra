@@ -72,6 +72,27 @@ app: local-parser
 {{- printf "%s://%s/n8n/" .Values.public.scheme .Values.public.host }}
 {{- end }}
 
+{{/*
+n8n Webhook node 註冊的路徑。單一來源：backend 打的網址與 n8n 註冊的路徑
+都從這裡推導，避免兩邊各自寫死而分岔。
+*/}}
+{{- define "care.n8nWebhookPath" -}}
+{{- .Values.n8n.provisioning.webhookPath }}
+{{- end }}
+
+{{/*
+backend 呼叫 n8n 的媒體解析 webhook。
+留空 backend.config.MEDIA_PARSE_WEBHOOK_URL 時由叢集內位址 + webhookPath 組出；
+要指向叢集外的 n8n 才在 values 填絕對網址覆寫。
+*/}}
+{{- define "care.mediaParseWebhookUrl" -}}
+{{- if .Values.backend.config.MEDIA_PARSE_WEBHOOK_URL }}
+{{- .Values.backend.config.MEDIA_PARSE_WEBHOOK_URL }}
+{{- else }}
+{{- printf "http://n8n-service:%v/webhook/%s" .Values.n8n.service.port (include "care.n8nWebhookPath" .) }}
+{{- end }}
+{{- end }}
+
 {{- define "care.corsAllowOrigins" -}}
 {{- if .Values.backend.config.CORS_ALLOW_ORIGINS }}
 {{- .Values.backend.config.CORS_ALLOW_ORIGINS }}

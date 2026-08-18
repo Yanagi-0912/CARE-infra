@@ -58,8 +58,11 @@ backend:
     # Hybrid retrieval：向量 + BM25，RRF 融合
     RAG_HYBRID_ENABLED: "true"
     RAG_RRF_K: "60"
-    # 叢集內打 n8n（對外 /n8n Ingress 目前無 strip-prefix；VM 舊 workflow path 為 UUID）
-    MEDIA_PARSE_WEBHOOK_URL: "http://n8n-service:8100/webhook/bff1fd27-efc4-45cf-b64a-adb0475aa35c"
+    # 空字串：由 n8n.provisioning.webhookPath 推導出 http://n8n-service:<port>/webhook/<path>。
+    # 留空是刻意的——backend 打的路徑與 n8n 實際註冊的路徑必須是同一個值，
+    # 分開寫遲早會分岔（2026-08 就發生過：repo 是 multimedia-process、線上是 UUID）。
+    # 真的要指向叢集外的 n8n 才在這裡填絕對網址。
+    MEDIA_PARSE_WEBHOOK_URL: ""
     # 空字串：依 public.scheme + public.host（LINE TTS 音檔公開網址）
     PUBLIC_BASE_URL: ""
     # 預設依 public.host 組出；可在此覆寫
@@ -157,6 +160,83 @@ n8n:
     enabled: true
     storageClass: local-path
     size: 10Gi
+
+  # n8n 的加密金鑰。憑證在 credentials_entity 表裡是用這把金鑰加密的。
+  #
+  # fromSecret: false —— 目前金鑰只存在 PVC 的 /home/node/.n8n/config（2026-05-19 產生）。
+  # PVC 一旦重建，n8n 會產生一把新的，既有憑證全部解不開，而錯誤訊息與「憑證不存在」
+  # 極相似，非常難分辨。
+  #
+  # 要開啟必須先把「現有的那把」存進 Secret，不能給新值：
+  #   kubectl exec -n care-dev deploy/care-n8n -- cat /home/node/.n8n/config
+  #   # 取出其中的 encryptionKey，存成 GitHub secret N8N_ENCRYPTION_KEY，
+  #   # 由 cicd.yml 寫進 care-backend-secret，再把下面改成 true。
+  #
+  # 註：provisioning 打開後，Gemini 這筆憑證每次 pod 啟動都會用當下的金鑰重新匯入，
+  # 所以就算金鑰換掉它也會自動修復。這裡的風險只對「手動在 UI 建立、未納入 provisioning」
+  # 的其他憑證成立。
+  encryptionKey:
+    fromSecret: false
+    secretName: care-backend-secret
+    secretKey: N8N_ENCRYPTION_KEY
+
+  # 把 n8n 的「內容」（憑證 + workflow）納入部署，而不是靠人手動在 UI 或 CLI 補。
+  #
+  # 背景：2026-08-04 起圖片辨識全數失敗，原因是這台 n8n 的 credentials_entity 是 0 筆。
+  # workflow JSON 只帶 credential ID，憑證本體加密存在各自的資料庫裡，不會跟著 JSON 走，
+  # 所以從別台 n8n 匯出的 workflow 到這裡一定對不上。同時 CARE-n8n repo 與線上也沒有
+  # 任何同步機制，repo 早就把模型改成 gemini-2.5-flash，線上卻還在用已下架的
+  # gemini-robotics-er-1.5-preview。兩件事都靠這個區塊解掉。
+  provisioning:
+    enabled: true
+
+    # true：provisioning 失敗就讓 pod 起不來。
+    # 刻意不採「失敗就略過」——一個沒有憑證卻正常運行的 n8n，對外的症狀只是
+    # backend 回 validation_error，看不出真因。寧可部署失敗也不要靜默降級。
+    # 全新安裝、n8n 還沒建立 owner 帳號時，把這裡設為 false 跑第一次。
+    failOnError: true
+
+    # 憑證 ID 固定寫死，讓 workflow 裡的引用永遠有效。
+    # 這個值就是線上正在用的那筆，不要隨意更動。
+    credentialId: "ZX3WWvD2O6rBruGC"
+    credentialName: "Google Gemini(PaLM) Api account"
+    credentialSecretName: care-backend-secret
+    credentialSecretKey: GEMINI_API_KEY
+    geminiHost: "https://generativelanguage.googleapis.com"
+
+    # workflow ID 固定：import 時沿用同一個 ID 才是覆蓋，否則會多出第二個 workflow，
+    # 而 backend 打的 webhook 仍指向舊的那個。
+    workflowId: "yKC658rkbLy0I3KC"
+
+    # webhook path。這個值同時決定：
+    #   1. n8n Webhook node 註冊的路徑（init container 會覆寫 JSON 裡的值）
+    #   2. backend 的 MEDIA_PARSE_WEBHOOK_URL（見 _helpers.tpl）
+    # 兩者由同一個值推導，不可能再分岔。
+    #
+    # 目前維持線上的 UUID，讓這次改動對行為完全中性。
+    # 要換成可讀的路徑（CARE-n8n repo 裡是 multimedia-process），改這一行即可——
+    # backend 與 n8n 會在同一次 helm upgrade 一起換過去。
+    webhookPath: "bff1fd27-efc4-45cf-b64a-adb0475aa35c"
+
+    # workflow JSON 來自 CARE-n8n repo，由 CI 建成 ConfigMap（helm 讀不到跨 repo 的檔案）。
+    # ConfigMap 的 key 不能有空白，所以檔名 "mutimedia process.json" 在 CI 端改名。
+    workflowConfigMap: n8n-workflows
+    workflowKey: "mutimedia-process.json"
+
+    # CI 以 --set 傳入 workflow 檔的 sha256，寫進 pod annotation。
+    # 內容有變才滾動更新；沒變的部署不會白白重啟 n8n。
+    workflowChecksum: "unset"
+
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+        ephemeral-storage: 128Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+        ephemeral-storage: 256Mi
+
   resources:
     requests:
       cpu: 500m

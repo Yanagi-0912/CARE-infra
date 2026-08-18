@@ -371,6 +371,15 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
 
+      # n8n 的 workflow JSON 在 CARE-n8n repo，部署時要做成 ConfigMap 給
+      # n8n deployment 的 provisioning init container 讀。
+      - name: Checkout n8n stack
+        uses: actions/checkout@v5
+        with:
+          repository: ${{ env.N8N_STACK_REPO }}
+          path: CARE-n8n
+          ref: ${{ env.N8N_STACK_REF }}
+
       - name: Set up kubectl
         uses: azure/setup-kubectl@v5
         with:
@@ -442,6 +451,36 @@ jobs:
             --from-literal=COHERE_API_KEY="$COHERE_API_KEY" \
             -n "$KUBE_NAMESPACE" --dry-run=client -o yaml | kubectl apply -f -
 
+      # n8n 的憑證與 workflow 存在 PVC 的 SQLite 裡，helm 管不到，過去只能靠人手動
+      # 在 UI 或 CLI 補。2026-08-04 起圖片辨識全數失敗就是因為沒人補憑證，而 repo
+      # 早已修好的模型也從未同步到線上。這一步把 workflow 內容納入部署；憑證則由
+      # n8n deployment 的 init container 從 care-backend-secret 產生。
+      #
+      # ConfigMap 的 key 只允許 [-._a-zA-Z0-9]，原檔名 "mutimedia process.json"
+      # 含空白，因此複製時改名。
+      - name: Create n8n workflow ConfigMap
+        run: |
+          SRC="CARE-n8n/resources/workflows/mutimedia process.json"
+          if [ ! -f "$SRC" ]; then
+            echo "::error::找不到 $SRC（CARE-n8n 的 workflow 路徑是否改過？）"
+            exit 1
+          fi
+          # 先驗證是合法 JSON。壞掉的檔案讓部署在這裡失敗，比讓 init container
+          # 在叢集裡失敗好查。
+          if ! python3 -c "import json,sys; json.load(open(sys.argv[1]))" "$SRC"; then
+            echo "::error::$SRC 不是合法 JSON"
+            exit 1
+          fi
+          mkdir -p .n8n-provision
+          cp "$SRC" .n8n-provision/mutimedia-process.json
+          kubectl create configmap n8n-workflows \
+            --from-file=.n8n-provision/mutimedia-process.json \
+            -n "$KUBE_NAMESPACE" --dry-run=client -o yaml | kubectl apply -f -
+          # 內容雜湊寫進 pod annotation：workflow 有變才滾動更新 n8n
+          CHECKSUM=$(sha256sum .n8n-provision/mutimedia-process.json | cut -c1-16)
+          echo "N8N_WORKFLOW_CHECKSUM=$CHECKSUM" >> "$GITHUB_ENV"
+          echo "workflow checksum = $CHECKSUM"
+
       - name: Deploy with Helm
         run: |
           helm upgrade --install "${{ env.HELM_RELEASE }}" "${{ env.HELM_CHART }}" \
@@ -462,6 +501,7 @@ jobs:
             --set parser.image.pullPolicy=Always \
             --set public.host=${{ env.PUBLIC_HOST }} \
             --set public.scheme=${{ env.PUBLIC_SCHEME }} \
+            --set n8n.provisioning.workflowChecksum=${{ env.N8N_WORKFLOW_CHECKSUM }} \
             --wait --timeout 15m
 
       # 等待所有 Deployment 完成滾動更新
