@@ -250,6 +250,11 @@ n8n:
   config:
     WHISPER_MODEL: "small"
     WHISPER_COMPUTE_TYPE: "int8"
+    # 只用 faster-whisper，不走 Breeze-ASR-26（hybrid）。Breeze 權重 6.17 GB，fp32 在
+    # CPU 上需要 6GB 以上記憶體，而節點總共 7.8Gi（2026-09-12 free -h）；它的依賴
+    # torch 也讓映像壓縮後 3.48 GB，那次部署把節點磁碟推到 95%、觸發驅逐、整站 502。
+    # local_asr 的預設值也已改成 faster-whisper，這裡寫明是為了讓線上設定一眼看得到。
+    ASR_BACKEND: "faster-whisper"
     PARSER_MAX_FILE_SIZE_MB: "20"
 
 # 語音轉文字；n8n workflow 以 http://local-asr:8200/transcribe 呼叫。
