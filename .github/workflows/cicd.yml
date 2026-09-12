@@ -358,17 +358,12 @@ jobs:
       - build-backend     # 需要後端映像
       - build-frontend    # 需要前端映像
       - validate          # 需要驗證通過
-      # 2026-09-09 加回。values.yaml 的 asr.enabled / parser.enabled 已改為 true，
-      # deploy 會以 --set 指定當次的映像 tag，所以必須等映像推上去才能部署——
-      # 少了這兩個 needs，deploy 會與 build 並行，而 ASR 映像（torch +
-      # transformers，2~5GB）build 遠比 deploy 慢，pod 幾乎必然 ImagePullBackOff。
-      #
-      # 代價（原本刻意不列入的理由，仍然成立）：ASR / Parser 任一邊 build 失敗，
-      # backend 與 frontend 的部署會一起停擺。若要在那種情況下緊急只部署後端，
-      # 手動觸發 workflow_dispatch 並把 asr.enabled / parser.enabled 設回 false，
-      # 或直接在 VM 上執行 helm upgrade。
-      - build-asr         # 需要 ASR 映像
-      - build-parser      # 需要 Parser 映像
+      # build-asr / build-parser 刻意不列入。這兩個服務由 values.yaml 的
+      # asr.enabled / parser.enabled 控制，目前為 false（仍在開發中，不部署），
+      # 因此部署根本用不到它們的映像。把它們留在 needs 的話，那邊一個還沒寫完
+      # 的 commit 就會讓 backend 與 frontend 的部署整個停擺。
+      # 兩個 build job 仍會照跑（讓映像保持最新），只是不再阻擋部署。
+      # 之後要啟用 asr/parser 時，記得把它們加回這裡。
     # 僅 push main 或手動觸發時部署
     if: github.event_name == 'workflow_dispatch' || github.event_name == 'repository_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
     runs-on: [self-hosted, Linux, care-k3s]
@@ -524,9 +519,9 @@ jobs:
           done
 
           # care-asr / care-parser 由 values.yaml 的 asr.enabled / parser.enabled
-          # 控制，2026-09-09 起為 true。這裡仍保留「存在才等待」的判斷，讓開關
-          # 被設回 false 時不會因為 Deployment 不存在就把整個部署判成失敗，即使
-          # backend 其實已經更新成功。
+          # 控制，目前為 false（服務仍在開發中，尚未部署）。存在才等待——直接
+          # 無條件 rollout status 會在 Deployment 不存在時失敗，把整個部署判成
+          # 失敗，即使 backend 其實已經更新成功。
           for d in care-asr care-parser; do
             if kubectl get "deployment/$d" -n "$KUBE_NAMESPACE" >/dev/null 2>&1; then
               kubectl rollout status "deployment/$d" -n "$KUBE_NAMESPACE" --timeout=5m

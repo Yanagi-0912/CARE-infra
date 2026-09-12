@@ -40,10 +40,7 @@ backend:
       memory: 512Mi
       ephemeral-storage: 1Gi
   config:
-    # 與 CARE app/core/config.py 的預設一致。這一行自 2026-05-19 Helm 重構後
-    # 一直停在 2.5-flash，而開發環境與 config.py 早已換成 3.8-flash——線上與
-    # 本機跑的是不同模型，延遲與 CRAG 判定的量測彼此不可比。
-    MODEL_NAME: "gemini-3.8-flash"
+    MODEL_NAME: "gemini-2.5-flash"
     EMBEDDING_MODEL: "gemini-embedding-001"
     LIFF_URL: "https://liff.line.me/2009177739-JJrPzjAn"
     MONGODB_DB: "CARE_database"
@@ -257,22 +254,15 @@ n8n:
 
 # 語音轉文字；n8n workflow 以 http://local-asr:8200/transcribe 呼叫。
 #
-# enabled: true —— 2026-09-08 開啟。設回 false 則整組資源（Deployment /
-# Service / PVC）都不建立，n8n 的語音分支會打不到後端，使用者傳語音收到
-# 「無法辨識」的提示。
+# enabled: false —— 這個服務仍在開發中，尚未部署。關閉時整組資源（Deployment /
+# Service / PVC）都不建立，n8n 的語音分支因此打不到後端，使用者傳語音會收到
+# 「無法辨識」的提示。這是已知且刻意的狀態，不是故障。
 #
-# 部署順序：cicd.yml 的 deploy job 已把 build-asr／build-parser 列入 needs，
-# 會等映像推上去才部署，不會因為 deploy 早於映像推送而 ImagePullBackOff。
-#
-# 已知待處理（見部署後觀察）：
-#   1. 映像含 torch + transformers，通常 2~5GB，首次啟動另會下載模型權重到 PVC。
-#      本專案有過映像堆積撐爆磁碟、觸發 kubelet 驅逐的紀錄（見 cicd.yml 的映像
-#      清理說明），部署後要盯節點磁碟餘裕。
-#   2. 叢集沒設 ASR_BACKEND，local_asr 會落回預設的 hybrid → 30 秒內的音訊走
-#      Breeze-ASR-26（Whisper-large 等級），下面的 memory limit 2Gi 很可能不夠。
-#      若 pod OOMKilled，設 ASR_BACKEND=faster-whisper 或把 limit 調高。
+# 開啟前要注意：映像含 torch + transformers，通常 2~5GB，且首次啟動會下載
+# Breeze-ASR-26 的模型權重到 PVC。本專案有過映像堆積撐爆磁碟、觸發 kubelet
+# 驅逐的紀錄（見 cicd.yml 的映像清理說明），開啟前先確認節點磁碟餘裕。
 asr:
-  enabled: true
+  enabled: false
   name: care-asr
   replicaCount: 1
   image:
@@ -301,12 +291,11 @@ asr:
 # 文件解析（pdf / docx / xlsx / pptx / html …）；n8n workflow 以
 # http://local-parser:8100/parse 呼叫。
 #
-# enabled: true —— 2026-09-08 與 asr 一併開啟。部署同樣會等 build-parser 的
-# 映像推上去（見 cicd.yml deploy 的 needs）。設回 false 則使用者上傳檔案會收到
+# enabled: false —— 同 asr，仍在開發中尚未部署。關閉時使用者上傳檔案會收到
 # 「無法辨識」的提示，且 media_handler 的文件 ingest（把解析結果存進使用者
 # 專屬 RAG 向量庫）也不會發生。
 parser:
-  enabled: true
+  enabled: false
   name: care-parser
   replicaCount: 1
   image:
