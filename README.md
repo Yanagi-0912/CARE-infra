@@ -120,7 +120,7 @@ kubeconform -summary -ignore-missing-schemas rendered.yaml
 K3s API 位址為 `127.0.0.1:6443`，GitHub 雲端 runner 無法連線，**deploy job 必須在 K3s VM 上跑 self-hosted runner**。
 
 1. GitHub → **Yanagi-0912/CARE-infra** → **Settings** → **Actions** → **Runners** → **New self-hosted runner**
-2. 在 VM（`192.168.101.41`）執行（token 一次性，從上一步複製）：
+2. 在 VM（GCP 上的 `care-vm`）執行（token 一次性，從上一步複製）：
 
 ```bash
 git clone https://github.com/Yanagi-0912/CARE-infra.git
@@ -130,9 +130,9 @@ sudo bash scripts/setup-self-hosted-runner.sh \
   --token PASTE_TOKEN_HERE
 ```
 
-3. Runners 頁面出現 **Idle** 的 `care-k3s-vm` 後，push `main` 或手動 **workflow_dispatch** 即會自動部署。
+3. Runners 頁面出現 **Idle** 的 `care-gcp-vm` 後，push `main` 或手動 **workflow_dispatch** 即會自動部署。
 
-Runner labels：`self-hosted`, `Linux`, `care-k3s`（對應 workflow `runs-on: [self-hosted, Linux, care-k3s]`）。
+Runner labels：`self-hosted`, `Linux`, `care-gcp`（對應 workflow `runs-on: [self-hosted, Linux, care-gcp]`）。
 
 維護指令（在 VM）：
 

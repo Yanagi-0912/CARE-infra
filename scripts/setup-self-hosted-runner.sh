@@ -11,14 +11,14 @@
 #
 # 可選環境變數：
 #   RUNNER_USER   預設：github-runner
-#   RUNNER_NAME   預設：care-k3s-vm
-#   RUNNER_LABELS 預設：self-hosted,Linux,care-k3s
+#   RUNNER_NAME   預設：care-gcp-vm
+#   RUNNER_LABELS 預設：self-hosted,Linux,care-gcp
 
 set -euo pipefail
 
 RUNNER_USER="${RUNNER_USER:-github-runner}"
-RUNNER_NAME="${RUNNER_NAME:-care-k3s-vm}"
-RUNNER_LABELS="${RUNNER_LABELS:-self-hosted,Linux,care-k3s}"
+RUNNER_NAME="${RUNNER_NAME:-care-gcp-vm}"
+RUNNER_LABELS="${RUNNER_LABELS:-self-hosted,Linux,care-gcp}"
 RUNNER_VERSION="${RUNNER_VERSION:-2.323.0}"
 INSTALL_DIR="/opt/actions-runner"
 
@@ -101,4 +101,4 @@ echo "==> 安裝 systemd 服務"
 
 echo ""
 echo "完成。請到 GitHub → CARE-infra → Settings → Actions → Runners 確認 ${RUNNER_NAME} 為 Idle。"
-echo "deploy job 使用 runs-on: [self-hosted, Linux, care-k3s]"
+echo "deploy job 使用 runs-on: [self-hosted, Linux, care-gcp]"
