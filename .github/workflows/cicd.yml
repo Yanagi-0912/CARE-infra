@@ -435,6 +435,8 @@ jobs:
           FIRECRAWL_API_KEY: ${{ secrets.FIRECRAWL_API_KEY }}
           COHERE_API_KEY: ${{ secrets.COHERE_API_KEY }}
           AUTH_JWT_SECRET: ${{ secrets.AUTH_JWT_SECRET }}
+          # 台語 STT／TTS（Taigi AI Labs）。沒設不擋部署：語言選台語的使用者照舊走國語語音。
+          TAIGI_API_KEY: ${{ secrets.TAIGI_API_KEY }}
         run: |
           # 沒設時後端會退回 config.py 的 "dev-only-change-me"，讀過原始碼的人都能
           # 簽出任意使用者的登入 token。寧可在這裡讓部署失敗。
