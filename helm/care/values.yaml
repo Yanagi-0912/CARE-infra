@@ -31,13 +31,17 @@ backend:
   service:
     port: 8000
   resources:
+    # 記憶體：2026-09-14 `kubectl top pod` 閒置時 475Mi，已是舊上限 512Mi 的九成三；
+    # CARE 1600cca 多載入 PyAV（約 +20 MB）後 backend 與 scheduler 啟動約 30 秒就
+    # OOMKilled。requests 取略高於觀測值（理由同下方 scheduler），limits 比觀測值多
+    # 約 290Mi。當時節點 15.6 GB 只用了 3.5 GB。
     requests:
       cpu: 100m
-      memory: 256Mi
+      memory: 512Mi
       ephemeral-storage: 512Mi
     limits:
       cpu: 500m
-      memory: 512Mi
+      memory: 768Mi
       ephemeral-storage: 1Gi
   config:
     # 與 CARE app/core/config.py 的預設一致。4afc226 曾改過一次，隨 ASR 一起被
@@ -107,8 +111,8 @@ scheduler:
     #
     # 線上（`kubectl top pod -n care-dev`，care-backend 閒置中）：328Mi。
     # 以線上數字為準——Linux 容器的配置器與頁面行為和 macOS 不同，實際比開發機
-    # 低約 65 MiB。requests 取 350Mi（略高於觀測值，讓 QoS 不會在節點吃緊時
-    # 被優先驅逐），limits 與 backend 同為 512Mi。
+    # 低約 65 MiB。requests 取略高於觀測值（讓 QoS 不會在節點吃緊時被優先驅逐），
+    # limits 與 backend 同級。數字見下方的校正。
     #
     # 重點：排程器 pod **並不比 backend 輕**。app/dependencies.py:354 是模組層級
     # 載入，只要 import app.main 就會把藥證庫與 n-gram 索引整個建起來，跟角色
@@ -120,9 +124,13 @@ scheduler:
     # 而那是條 async 路徑——等於製造另一個事件迴圈阻塞。不划算，維持現況。
     #
     # 註：量測在 macOS 上做，Linux 容器的 RSS 會有出入，上線後應以實際峰值校正。
+    #
+    # 校正（2026-09-14）：線上閒置已到 467Mi（backend 475Mi），原本的 350Mi／512Mi
+    # 只剩一成餘裕；CARE 1600cca 多載入 PyAV 後啟動就 OOMKilled。requests 改
+    # 512Mi、limits 改 768Mi，與 backend 相同。
     requests:
       cpu: 100m
-      memory: 350Mi
+      memory: 512Mi
       ephemeral-storage: 256Mi
     limits:
       # CPU 與 backend 同級而非更低：啟動時建 n-gram 索引是 CPU 密集的，
@@ -130,7 +138,7 @@ scheduler:
       #   500m → 約 4.5s   200m → 約 11s
       # 而 probe 的預算有限（見 scheduler-deployment.yaml 的 startupProbe）。
       cpu: 500m
-      memory: 512Mi
+      memory: 768Mi
       ephemeral-storage: 512Mi
 
 frontend:

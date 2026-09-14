@@ -457,6 +457,7 @@ jobs:
             --from-literal=FIRECRAWL_API_KEY="$FIRECRAWL_API_KEY" \
             --from-literal=COHERE_API_KEY="$COHERE_API_KEY" \
             --from-literal=AUTH_JWT_SECRET="$AUTH_JWT_SECRET" \
+            --from-literal=TAIGI_API_KEY="$TAIGI_API_KEY" \
             -n "$KUBE_NAMESPACE" --dry-run=client -o yaml | kubectl apply -f -
 
       # n8n 的憑證與 workflow 存在 PVC 的 SQLite 裡，helm 管不到，過去只能靠人手動
