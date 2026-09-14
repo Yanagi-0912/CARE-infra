@@ -434,7 +434,14 @@ jobs:
           REDIS_URL: ${{ secrets.REDIS_URL }}
           FIRECRAWL_API_KEY: ${{ secrets.FIRECRAWL_API_KEY }}
           COHERE_API_KEY: ${{ secrets.COHERE_API_KEY }}
+          AUTH_JWT_SECRET: ${{ secrets.AUTH_JWT_SECRET }}
         run: |
+          # 沒設時後端會退回 config.py 的 "dev-only-change-me"，讀過原始碼的人都能
+          # 簽出任意使用者的登入 token。寧可在這裡讓部署失敗。
+          if [ -z "$AUTH_JWT_SECRET" ]; then
+            echo "::error::GitHub secret AUTH_JWT_SECRET 未設定"
+            exit 1
+          fi
           kubectl create secret generic care-backend-secret \
             --from-literal=GEMINI_API_KEY="$GEMINI_API_KEY" \
             --from-literal=MONGODB_URI="$MONGODB_URI" \
@@ -447,6 +454,7 @@ jobs:
             --from-literal=REDIS_URL="$REDIS_URL" \
             --from-literal=FIRECRAWL_API_KEY="$FIRECRAWL_API_KEY" \
             --from-literal=COHERE_API_KEY="$COHERE_API_KEY" \
+            --from-literal=AUTH_JWT_SECRET="$AUTH_JWT_SECRET" \
             -n "$KUBE_NAMESPACE" --dry-run=client -o yaml | kubectl apply -f -
 
       # n8n 的憑證與 workflow 存在 PVC 的 SQLite 裡，helm 管不到，過去只能靠人手動
