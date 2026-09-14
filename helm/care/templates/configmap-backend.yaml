@@ -21,6 +21,10 @@ data:
   USER_DOCS_TTL_SECONDS: {{ .Values.backend.config.USER_DOCS_TTL_SECONDS | quote }}
   RAG_HYBRID_ENABLED: {{ .Values.backend.config.RAG_HYBRID_ENABLED | quote }}
   RAG_RRF_K: {{ .Values.backend.config.RAG_RRF_K | quote }}
+  # 家庭權限的總閘，說明見 values.yaml。不用 `default "true"`：Helm 的 default 把
+  # 布林 false 當成空值，values 寫 FAMILY_RBAC_ENFORCED: false 會被換回 "true"，
+  # 回滾就靜靜失效。改用 hasKey，只有缺鍵時才給 "true"（與程式預設相同）。
+  FAMILY_RBAC_ENFORCED: {{ if hasKey .Values.backend.config "FAMILY_RBAC_ENFORCED" }}{{ .Values.backend.config.FAMILY_RBAC_ENFORCED | toString | quote }}{{ else }}"true"{{ end }}
   MEDIA_PARSE_WEBHOOK_URL: {{ include "care.mediaParseWebhookUrl" . | quote }}
   PUBLIC_BASE_URL: {{ include "care.publicBaseUrl" . | quote }}
   CORS_ALLOW_ORIGINS: {{ include "care.corsAllowOrigins" . | quote }}
