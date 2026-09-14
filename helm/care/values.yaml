@@ -40,7 +40,11 @@ backend:
       memory: 512Mi
       ephemeral-storage: 1Gi
   config:
-    MODEL_NAME: "gemini-2.5-flash"
+    # 與 CARE app/core/config.py 的預設一致。4afc226 曾改過一次，隨 ASR 一起被
+    # revert（9eade67）才退回 2.5-flash。不能留在 2.5：CRAG 分級與查詢改寫以
+    # thinking_level="low" 建立，2.5-flash 對這個參數回 400（Thinking level is
+    # not supported for this model），兩者會每次都失敗。
+    MODEL_NAME: "gemini-3.8-flash"
     EMBEDDING_MODEL: "gemini-embedding-001"
     LIFF_URL: "https://liff.line.me/2009177739-JJrPzjAn"
     MONGODB_DB: "CARE_database"
