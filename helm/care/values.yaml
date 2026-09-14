@@ -263,15 +263,15 @@ n8n:
 
 # 語音轉文字；n8n workflow 以 http://local-asr:8200/transcribe 呼叫。
 #
-# enabled: false —— 這個服務仍在開發中，尚未部署。關閉時整組資源（Deployment /
-# Service / PVC）都不建立，n8n 的語音分支因此打不到後端，使用者傳語音會收到
-# 「無法辨識」的提示。這是已知且刻意的狀態，不是故障。
+# 關閉時整組資源（Deployment / Service / PVC）都不建立，n8n 的語音分支打不到
+# 後端，使用者傳語音會收到「無法辨識」的提示。
 #
-# 開啟前要注意：映像含 torch + transformers，通常 2~5GB，且首次啟動會下載
-# Breeze-ASR-26 的模型權重到 PVC。本專案有過映像堆積撐爆磁碟、觸發 kubelet
-# 驅逐的紀錄（見 cicd.yml 的映像清理說明），開啟前先確認節點磁碟餘裕。
+# 2026-09-12 開過一次：當時映像含 CUDA 版 torch，壓縮後 3.48 GB，把節點磁碟從
+# 84% 推到 95%，觸發驅逐、整站 502。CARE-n8n 3236f2c 把 torch／transformers 移到
+# breeze 群組、映像不再安裝，CI build 壓縮後 0.39 GB（care-asr:170-3236f2c）。
+# 首次啟動仍會下載 Whisper 模型到 PVC。出事時把這裡改回 false 再推一次即可回滾。
 asr:
-  enabled: false
+  enabled: true
   name: care-asr
   replicaCount: 1
   image:
@@ -300,11 +300,12 @@ asr:
 # 文件解析（pdf / docx / xlsx / pptx / html …）；n8n workflow 以
 # http://local-parser:8100/parse 呼叫。
 #
-# enabled: false —— 同 asr，仍在開發中尚未部署。關閉時使用者上傳檔案會收到
-# 「無法辨識」的提示，且 media_handler 的文件 ingest（把解析結果存進使用者
-# 專屬 RAG 向量庫）也不會發生。
+# 映像壓縮後約 0.1 GB（Docker Hub yanagi0912/care-parser:169-f9ca3fd），limits
+# 512Mi，不會重演 ASR 那次的磁碟壓力。關閉時使用者上傳檔案會收到「無法辨識」
+# 的提示，且 media_handler 的文件 ingest（把解析結果存進使用者專屬 RAG 向量庫）
+# 也不會發生。
 parser:
-  enabled: false
+  enabled: true
   name: care-parser
   replicaCount: 1
   image:
