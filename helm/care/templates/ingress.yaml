@@ -61,17 +61,7 @@ spec:
                 name: {{ .Values.backend.name }}
                 port:
                   number: {{ .Values.backend.service.port }}
-          # 後端的健康檢查（app/routers/system.py，掛在根路徑、不在 /api 底下）。
-          # 外部 uptime check 靠這條判斷後端活著：漏了它，/health 會落到下面的
-          # / 規則，前端 nginx 對任何路徑都回 index.html 200，後端死了也照樣
-          # 顯示正常。用 Exact 只開放這一個路徑，/health/scheduler 不對外。
-          - path: /health
-            pathType: Exact
-            backend:
-              service:
-                name: {{ .Values.backend.name }}
-                port:
-                  number: {{ .Values.backend.service.port }}
+          # /health 在 ingress-health.yaml：放在這裡會跟下面的 / 打平優先權、被前端搶走。
           - path: /
             pathType: Prefix
             backend:

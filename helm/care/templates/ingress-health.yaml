@@ -1,0 +1,35 @@
+{{- if .Values.ingress.enabled }}
+# 後端的健康檢查（CARE app/routers/system.py，掛在根路徑、不在 /api 底下），給外部
+# uptime check 判斷 backend 死活。沒有這條，/health 會落到 / 規則，前端 nginx 對任何
+# 路徑都回 index.html 200，backend 掛了也照樣顯示正常。
+#
+# 為什麼獨立成一個 Ingress：Traefik 預設以規則字串長度當路由優先權，Exact 的
+# Path(`/health`) 與前端的 PathPrefix(`/`) 剛好都是 15 個字元，同分時 /health 被前端
+# 搶走——2026-09-15 放在 care-app 裡部署後，從節點上的 Traefik 打 /health 三次都回
+# 前端的 index.html。其他路徑（/api、/tts…）的規則都比 15 長，所以沒遇過。
+# router.priority 只能設在整個 Ingress 上（會套到它所有路徑），所以拆出來單獨給。
+#
+# 用 Exact 只開放這一個路徑，/health/scheduler 不對外。
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: care-health
+  namespace: {{ include "care.namespace" . }}
+  labels:
+    {{- include "care.labels" . | nindent 4 }}
+  annotations:
+    # 高於 care-app 裡任何一條的預設優先權（規則長度，最長的 /drug-appearance 是 30）。
+    traefik.ingress.kubernetes.io/router.priority: "100"
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  rules:
+    - http:
+        paths:
+          - path: /health
+            pathType: Exact
+            backend:
+              service:
+                name: {{ .Values.backend.name }}
+                port:
+                  number: {{ .Values.backend.service.port }}
+{{- end }}
