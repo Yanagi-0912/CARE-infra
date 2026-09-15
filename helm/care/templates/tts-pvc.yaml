@@ -1,0 +1,20 @@
+{{- if .Values.tts.enabled }}
+{{- /*
+  語音回覆的 mp3，保留 30 天（CARE tts_service.DEFAULT_TTS_FILE_TTL_SECONDS，與對話原文
+  的保存期限相同）。沒有這個 PVC，每次部署換 pod 都會把還在期限內的語音全部弄丟。
+*/}}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ .Values.tts.persistence.claimName }}
+  namespace: {{ include "care.namespace" . }}
+  labels:
+    {{- include "care.tts.labels" . | nindent 4 }}
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: {{ .Values.tts.persistence.storageClass }}
+  resources:
+    requests:
+      storage: {{ .Values.tts.persistence.size }}
+{{- end }}

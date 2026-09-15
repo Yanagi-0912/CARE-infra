@@ -33,13 +33,22 @@ spec:
                 name: {{ .Values.backend.name }}
                 port:
                   number: {{ .Values.backend.service.port }}
+          # 語音回覆的音檔。LINE 在使用者按播放時會來拿：2026-09-15 10:55 送出的語音，
+          # 11:00:30 按播放時 LINE 才來抓，那時檔案已隨 10:56 的部署消失。tts.enabled 時
+          # 導到 care-tts（音檔存在它的 PVC），否則導回 backend 自己存的檔。
           - path: /tts
             pathType: Prefix
             backend:
               service:
+                {{- if .Values.tts.enabled }}
+                name: {{ .Values.tts.name }}
+                port:
+                  number: {{ .Values.tts.service.port }}
+                {{- else }}
                 name: {{ .Values.backend.name }}
                 port:
                   number: {{ .Values.backend.service.port }}
+                {{- end }}
           # 藥丸縮圖的靜態服務（app/routers/drug_appearance/images.py）。
           # 這條路由是功能本身的一部分，不是可選的優化：LINE 伺服器會在推播
           # 渲染當下來抓這個 URL，漏了這條就落到下面的 / 規則、拿到前端的

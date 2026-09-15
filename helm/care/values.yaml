@@ -141,6 +141,43 @@ scheduler:
       memory: 768Mi
       ephemeral-storage: 512Mi
 
+# 語音合成（care-tts）：合成 LINE 語音回覆、把 mp3 存在 PVC、提供 /tts 給 LINE 下載。
+# 與 backend 共用同一個 image，只換啟動指令成 app.tts_main（說明見 tts-deployment.yaml）。
+#
+# enabled 同時決定三件事，由模板綁在一起：建不建 care-tts（Deployment／Service／PVC）、
+# care-backend-config 的 TTS_SERVICE_URL 有沒有值、ingress 的 /tts 導去哪裡。
+#
+# 回滾：改成 false 推上 main。backend 的 TTS_SERVICE_URL 變空、改回自己合成，/tts 導回
+# backend，行為回到拆分前（音檔又會隨部署消失）。PVC 會跟著被刪，裡面的音檔一起沒了。
+tts:
+  enabled: true
+  name: care-tts
+  service:
+    port: 8000
+  persistence:
+    claimName: care-tts-audio
+    storageClass: local-path
+    # local-path 其實是節點上的一個目錄，不會強制這個大小，真正的上限是節點磁碟
+    # （2026-09-15 用了 24%，14G／58G）。2Gi 約可放一萬則 36 秒的語音（48 kbps
+    # 單聲道，每則約 216 KB）。
+    size: 2Gi
+  resources:
+    # 記憶體（2026-09-15 在 macOS 跑 app.tts_main 量）：啟動後閒置 124 MiB；把 110 秒的
+    # 台語音檔（2026-09-14 正式環境最長的一則）轉 mp3 時峰值 179 MiB，每多一則同時合成
+    # 約多 57 MiB。requests 取峰值；limits 取約兩倍，同時四則最長的語音也放得下。
+    # scheduler 的經驗是 Linux 容器比 macOS 低，上線後以 kubectl top 校正。
+    requests:
+      cpu: 100m
+      memory: 192Mi
+      ephemeral-storage: 128Mi
+    limits:
+      # 與 backend 相同：轉 mp3 原本就在 backend 的 500m 下跑（2026-09-14 實測 110 秒
+      # 音檔 1.5 秒），維持一樣才不會讓使用者多等。
+      cpu: 500m
+      memory: 384Mi
+      # 音檔在 PVC，不算 ephemeral；這裡只剩 log。
+      ephemeral-storage: 256Mi
+
 frontend:
   name: care-frontend
   replicaCount: 1

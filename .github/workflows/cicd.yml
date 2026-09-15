@@ -527,11 +527,11 @@ jobs:
             kubectl rollout status "deployment/$d" -n "$KUBE_NAMESPACE" --timeout=5m
           done
 
-          # care-asr / care-parser 由 values.yaml 的 asr.enabled / parser.enabled
-          # 控制，任一個可能是關的。存在才等待——直接無條件 rollout status 會在
-          # Deployment 不存在時失敗，把整個部署判成失敗，即使 backend 其實已經
-          # 更新成功。
-          for d in care-asr care-parser; do
+          # care-asr / care-parser / care-tts 由 values.yaml 的 asr.enabled /
+          # parser.enabled / tts.enabled 控制，任一個可能是關的。存在才等待——直接
+          # 無條件 rollout status 會在 Deployment 不存在時失敗，把整個部署判成失敗，
+          # 即使 backend 其實已經更新成功。
+          for d in care-asr care-parser care-tts; do
             if kubectl get "deployment/$d" -n "$KUBE_NAMESPACE" >/dev/null 2>&1; then
               kubectl rollout status "deployment/$d" -n "$KUBE_NAMESPACE" --timeout=5m
             else

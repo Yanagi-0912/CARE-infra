@@ -56,6 +56,21 @@ app: local-asr
 app: local-parser
 {{- end }}
 
+{{- define "care.tts.labels" -}}
+{{ include "care.labels" . }}
+app: {{ .Values.tts.name }}
+{{- end }}
+
+{{/*
+backend 呼叫 care-tts 的叢集內位址。tts.enabled 為 false 時是空字串，backend 就自己
+合成、自己存檔（拆分前的行為）。
+*/}}
+{{- define "care.ttsServiceUrl" -}}
+{{- if .Values.tts.enabled }}
+{{- printf "http://%s:%v" .Values.tts.name .Values.tts.service.port }}
+{{- end }}
+{{- end }}
+
 {{- define "care.publicOrigin" -}}
 {{- printf "%s://%s" .Values.public.scheme .Values.public.host }}
 {{- end }}

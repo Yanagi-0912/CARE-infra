@@ -26,5 +26,7 @@ data:
   # 回滾就靜靜失效。改用 hasKey，只有缺鍵時才給 "true"（與程式預設相同）。
   FAMILY_RBAC_ENFORCED: {{ if hasKey .Values.backend.config "FAMILY_RBAC_ENFORCED" }}{{ .Values.backend.config.FAMILY_RBAC_ENFORCED | toString | quote }}{{ else }}"true"{{ end }}
   MEDIA_PARSE_WEBHOOK_URL: {{ include "care.mediaParseWebhookUrl" . | quote }}
+  # care-tts 的叢集內位址；tts.enabled 為 false 時是空字串，backend 就自己合成。
+  TTS_SERVICE_URL: {{ include "care.ttsServiceUrl" . | quote }}
   PUBLIC_BASE_URL: {{ include "care.publicBaseUrl" . | quote }}
   CORS_ALLOW_ORIGINS: {{ include "care.corsAllowOrigins" . | quote }}

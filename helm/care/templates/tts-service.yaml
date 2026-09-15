@@ -1,0 +1,19 @@
+{{- if .Values.tts.enabled }}
+# 叢集內：backend 以 http://<name>:<port> 呼叫合成（care-backend-config 的 TTS_SERVICE_URL）。
+# 對外：ingress 只把 /tts（音檔下載）導到這裡，/internal/synthesize 從外面打不到。
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Values.tts.name }}
+  namespace: {{ include "care.namespace" . }}
+  labels:
+    {{- include "care.tts.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    app: {{ .Values.tts.name }}
+  ports:
+    - name: http
+      port: {{ .Values.tts.service.port }}
+      targetPort: {{ .Values.tts.service.port }}
+{{- end }}

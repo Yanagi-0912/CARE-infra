@@ -1,0 +1,92 @@
+{{- if .Values.tts.enabled }}
+# 語音合成（care-tts）：合成 LINE 語音回覆、把 mp3 存在 PVC、提供 /tts 給 LINE 下載。
+# 程式是 CARE 的 app/tts_main.py；backend 經由 care-backend-config 的 TTS_SERVICE_URL
+# 把合成交給這裡。
+#
+# 為什麼拆出來：音檔原本存在 backend 容器裡，部署換 pod 就全丟——2026-09-15 10:55
+# 送出的語音，10:56 部署後 11:00 按播放，LINE 來拿檔得到 404，畫面顯示「語音訊息的
+# 保存期限已過」。backend 以後開多份，A 產的檔被分到 B 去拿也一樣 404。
+#
+# 與 backend 共用同一個 image（理由同 scheduler：程式版本永遠一致），只把啟動指令換成
+# app.tts_main。它不載入藥證庫等 backend 的東西，所以資源另外設（見 values.yaml）。
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Values.tts.name }}
+  namespace: {{ include "care.namespace" . }}
+  labels:
+    {{- include "care.tts.labels" . | nindent 4 }}
+spec:
+  # 一份就夠：下載音檔很輕，合成原本也是單份 backend 在做。要多份的話，同一台節點上
+  # 的 pod 可以共用下面的 PVC（ReadWriteOnce 限制的是節點，不是 pod）；跨節點才要換成
+  # 多台都能讀寫的儲存。
+  replicas: 1
+  # 先起新的、ready 後才關舊的（與 backend 相同），部署時 /tts 不會斷。新舊 pod 都在
+  # 同一台節點，可以同時掛同一個 PVC。
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app: {{ .Values.tts.name }}
+  template:
+    metadata:
+      labels:
+        app: {{ .Values.tts.name }}
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: {{ .Values.tts.name }}
+          image: "{{ .Values.backend.image.repository }}:{{ .Values.backend.image.tag }}"
+          imagePullPolicy: {{ .Values.backend.image.pullPolicy }}
+          command: ["uvicorn", "app.tts_main:app", "--host", "0.0.0.0", "--port", "{{ .Values.tts.service.port }}"]
+          ports:
+            - containerPort: {{ .Values.tts.service.port }}
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: {{ .Values.tts.service.port }}
+            initialDelaySeconds: 3
+            periodSeconds: 5
+            failureThreshold: 3
+          resources:
+            {{- toYaml .Values.tts.resources | nindent 12 }}
+          # 只給用得到的設定，不 envFrom 整份 secret：這個 pod 不碰 Mongo、LINE、Redis，
+          # 也就不需要那些金鑰。
+          env:
+            # 台語改寫（CARE app/services/speech/taigi_text.py）
+            - name: GEMINI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secret.name }}
+                  key: GEMINI_API_KEY
+            # 台語 TTS；沒設就改念國語，不擋啟動（與 cicd.yml 建 secret 時的處理一致）
+            - name: TAIGI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secret.name }}
+                  key: TAIGI_API_KEY
+                  optional: true
+            - name: MODEL_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: care-backend-config
+                  key: MODEL_NAME
+            # 組給 LINE 的音檔網址
+            - name: PUBLIC_BASE_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: care-backend-config
+                  key: PUBLIC_BASE_URL
+          volumeMounts:
+            # 工作目錄是 /app，程式寫的是相對路徑 app_data/tmp（tts_service.TTS_TMP_DIR）。
+            # local-path 建目錄時給 0777，image 以 uid 1001（care）執行也寫得進去。
+            - name: tts-audio
+              mountPath: /app/app_data/tmp
+      volumes:
+        - name: tts-audio
+          persistentVolumeClaim:
+            claimName: {{ .Values.tts.persistence.claimName }}
+{{- end }}
