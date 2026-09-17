@@ -35,13 +35,19 @@ backend:
     # CARE 1600cca 多載入 PyAV（約 +20 MB）後 backend 與 scheduler 啟動約 30 秒就
     # OOMKilled。requests 取略高於觀測值（理由同下方 scheduler），limits 比觀測值多
     # 約 290Mi。當時節點 15.6 GB 只用了 3.5 GB。
+    #
+    # 2026-09-17 limits 768Mi→1536Mi：13:52 UTC 有人在 pod 裡 `kubectl exec python`
+    # 並 import app.dependencies，等於在同一個 cgroup 再載一份 app（kernel OOM 紀錄
+    # 該行程 anon-rss 262Mi），加上 uvicorn 的 502Mi 超過上限，整個容器 OOMKilled，
+    # 外部 /health 斷約 1 分鐘並觸發 uptime 告警。1536Mi 約為閒置值三倍，容得下再載
+    # 一份完整 app 加請求尖峰；當時節點 15.6 GB 只用 4.2 GB。
     requests:
       cpu: 100m
       memory: 512Mi
       ephemeral-storage: 512Mi
     limits:
       cpu: 500m
-      memory: 768Mi
+      memory: 1536Mi
       ephemeral-storage: 1Gi
   config:
     # 與 CARE app/core/config.py 的預設一致。4afc226 曾改過一次，隨 ASR 一起被
@@ -128,6 +134,7 @@ scheduler:
     # 校正（2026-09-14）：線上閒置已到 467Mi（backend 475Mi），原本的 350Mi／512Mi
     # 只剩一成餘裕；CARE 1600cca 多載入 PyAV 後啟動就 OOMKilled。requests 改
     # 512Mi、limits 改 768Mi，與 backend 相同。
+    # 2026-09-17 limits 隨 backend 調到 1536Mi（原因見 backend），同一個映像一樣會被 exec 撐爆。
     requests:
       cpu: 100m
       memory: 512Mi
@@ -138,7 +145,7 @@ scheduler:
       #   500m → 約 4.5s   200m → 約 11s
       # 而 probe 的預算有限（見 scheduler-deployment.yaml 的 startupProbe）。
       cpu: 500m
-      memory: 768Mi
+      memory: 1536Mi
       ephemeral-storage: 512Mi
 
 # 語音合成（care-tts）：合成 LINE 語音回覆、把 mp3 存在 PVC、提供 /tts 給 LINE 下載。
