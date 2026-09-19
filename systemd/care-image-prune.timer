@@ -1,5 +1,5 @@
 [Unit]
-Description=每日回收 CARE VM 的 Docker build cache
+Description=每日回收 CARE VM 的舊容器映像與 build cache
 Documentation=https://github.com/Yanagi-0912/CARE-infra
 
 [Timer]

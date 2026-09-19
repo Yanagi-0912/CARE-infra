@@ -11,6 +11,7 @@
 #   --warn-pct N      磁碟警戒門檻，預設 80
 #   --crit-pct N      磁碟緊急回收門檻，預設 85
 #   --keep-hours N    例行回收保留多久內的 build cache，預設 48
+#   --keep-builds N   例行回收每個映像 repository 保留幾個 tag，預設 3
 #   --fix-kubeconfig  順便修好 k3s.yaml 的權限（見下方說明）
 #   --enable-ci-sudo  讓 CI 的 deploy job 能免密碼執行守門員（見下方說明）
 #   --ci-user NAME    CI runner 跑在哪個使用者下，預設為執行 sudo 的本人
@@ -37,6 +38,7 @@ WEBHOOK=""
 WARN_PCT="80"
 CRIT_PCT="85"
 KEEP_HOURS="48"
+KEEP_BUILDS="3"
 FIX_KUBECONFIG="false"
 ENABLE_CI_SUDO="false"
 CI_USER=""
@@ -47,8 +49,12 @@ REPO_ROOT="$(dirname "$SCRIPT_DIR")"
 SBIN_TARGET="/usr/local/sbin/vm-disk-guard.sh"
 ENV_FILE="/etc/care/disk-guard.env"
 SUDOERS_FILE="/etc/sudoers.d/care-vm-maintenance"
-UNITS=(care-disk-guard.service care-disk-guard.timer care-docker-prune.service care-docker-prune.timer)
-TIMERS=(care-disk-guard.timer care-docker-prune.timer)
+UNITS=(care-disk-guard.service care-disk-guard.timer care-image-prune.service care-image-prune.timer)
+TIMERS=(care-disk-guard.timer care-image-prune.timer)
+# 改名前的 unit。留在機器上會造成兩個 timer 同時存在，舊的那個還指向已經不再
+# 對應實際工作的名字（care-docker-prune，但這台 VM 沒有 docker）。安裝與解除
+# 安裝都要一併清掉，否則舊 timer 會一直在 systemctl list-timers 裡誤導人。
+LEGACY_UNITS=(care-docker-prune.timer care-docker-prune.service)
 K3S_GROUP="k3s"
 
 usage() {
@@ -62,6 +68,7 @@ while [[ $# -gt 0 ]]; do
     --warn-pct) WARN_PCT="$2"; shift 2 ;;
     --crit-pct) CRIT_PCT="$2"; shift 2 ;;
     --keep-hours) KEEP_HOURS="$2"; shift 2 ;;
+    --keep-builds) KEEP_BUILDS="$2"; shift 2 ;;
     --fix-kubeconfig) FIX_KUBECONFIG="true"; shift ;;
     --enable-ci-sudo) ENABLE_CI_SUDO="true"; shift ;;
     --ci-user) CI_USER="$2"; shift 2 ;;
@@ -79,10 +86,10 @@ done
 # --- 解除安裝 -----------------------------------------------------------------
 
 if [[ "$UNINSTALL" == "true" ]]; then
-  for t in "${TIMERS[@]}"; do
+  for t in "${TIMERS[@]}" "${LEGACY_UNITS[@]}"; do
     systemctl disable --now "$t" 2>/dev/null || true
   done
-  for u in "${UNITS[@]}"; do
+  for u in "${UNITS[@]}" "${LEGACY_UNITS[@]}"; do
     rm -f "/etc/systemd/system/$u"
   done
   rm -f "$SBIN_TARGET" "$SUDOERS_FILE"
@@ -109,10 +116,20 @@ cat >"$ENV_FILE" <<EOF
 DISK_GUARD_WARN_PCT=${WARN_PCT}
 DISK_GUARD_CRIT_PCT=${CRIT_PCT}
 DISK_GUARD_KEEP_HOURS=${KEEP_HOURS}
+DISK_GUARD_KEEP_BUILDS=${KEEP_BUILDS}
 CARE_ALERT_WEBHOOK=${WEBHOOK}
 EOF
 chmod 0600 "$ENV_FILE"
 umask 022
+
+echo "==> 移除改名前的舊 unit"
+for u in "${LEGACY_UNITS[@]}"; do
+  if [[ -e "/etc/systemd/system/$u" ]]; then
+    systemctl disable --now "$u" 2>/dev/null || true
+    rm -f "/etc/systemd/system/$u"
+    echo "    已移除 $u"
+  fi
+done
 
 echo "==> 安裝 systemd unit"
 for u in "${UNITS[@]}"; do

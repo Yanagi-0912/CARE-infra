@@ -1,0 +1,23 @@
+[Unit]
+# 例行回收：k3s 舊映像（每個 repository 保留最新 KEEP_BUILDS 個 tag）
+# ＋超過 KEEP_HOURS 的 Docker build cache（這台 VM 已無 docker，那段會自動跳過）
+#
+# 與 care-disk-guard.service 的分工：那支是「快滿了才緊急清」的安全網，
+# 只在水位 ≥ CRIT（85%）時動手；這支是日常衛生，讓水位根本走不到那裡。
+#
+# 本 unit 取代舊的 care-docker-prune.service。改名是因為舊名字在說謊：
+# 這台 VM 沒有 docker，而它實際要清的是 k3s 的映像。
+Documentation=https://github.com/Yanagi-0912/CARE-infra
+After=k3s.service docker.service
+Wants=k3s.service
+
+[Service]
+Type=oneshot
+# 需要 root：docker.sock 與 k3s crictl 都要
+User=root
+EnvironmentFile=-/etc/care/disk-guard.env
+ExecStart=/usr/local/sbin/vm-disk-guard.sh prune
+
+# 回收本身不該把磁碟壓力變得更糟，限制資源佔用
+Nice=10
+IOSchedulingClass=idle

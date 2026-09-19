@@ -559,10 +559,19 @@ jobs:
           GUARD=/usr/local/sbin/vm-disk-guard.sh
           BEFORE=$(df -P / | awk 'NR==2 { gsub(/%/, "", $5); print $5 }')
 
+          # check 與 prune 是兩件事，兩個都要跑：
+          #   check —— 水位 ≥ CRIT（85%）時的緊急回收，這是安全網。
+          #   prune —— 這次部署剛產生的新 tag 讓每個 repository 又多一版，
+          #            把超出保留數的舊 tag 清掉。這才是讓水位走不到 85% 的原因。
+          # 只跑 check 的後果實測過（2026-09-19）：74 個映像只有 14 個在用，
+          # #220 一路堆到 #237，因為水位一直在 85% 以下，check 每次都什麼都沒做。
           if [ ! -x "$GUARD" ]; then
             echo "::warning::VM 尚未安裝磁碟守門員，略過回收。請在 VM 執行：sudo bash scripts/install-vm-maintenance.sh --fix-kubeconfig --enable-ci-sudo"
           elif sudo -n "$GUARD" check; then
             echo "守門員巡檢完成"
+            # 回收失敗不該讓部署變紅（部署已經成功，這只是衛生工作），
+            # 但要留下 warning，否則映像會靜靜地繼續堆積、沒有人知道。
+            sudo -n "$GUARD" prune || echo "::warning::例行映像回收失敗，請看 journalctl -t care-disk-guard"
           else
             echo "::warning::無法免密碼執行守門員。請在 VM 重跑安裝腳本並加上 --enable-ci-sudo"
           fi
