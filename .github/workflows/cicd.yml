@@ -437,6 +437,14 @@ jobs:
           AUTH_JWT_SECRET: ${{ secrets.AUTH_JWT_SECRET }}
           # 台語 STT／TTS（Taigi AI Labs）。沒設不擋部署：語言選台語的使用者照舊走國語語音。
           TAIGI_API_KEY: ${{ secrets.TAIGI_API_KEY }}
+          # RAG 向量檢索的 PostgreSQL 連線（2026-09-19 從 Atlas 搬出）。
+          # 格式：postgresql://care_app:<密碼>@db.meddemo.svc.cluster.local:5432/care_vectors
+          # 沒設不擋部署：向量那條腿會失敗，HybridRetriever 的 _safe_invoke 會
+          # 降級成純 BM25——服務還在，只是檢索少一條腿。
+          PGVECTOR_DSN: ${{ secrets.PGVECTOR_DSN }}
+          # 向量同步 CronJob 用的寫入帳號（care_sync）。與 PGVECTOR_DSN 分開是
+          # 權限最小化：backend 只需要 SELECT，同步才需要 INSERT/UPDATE。
+          PGVECTOR_SYNC_DSN: ${{ secrets.PGVECTOR_SYNC_DSN }}
         run: |
           # 沒設時後端會退回 config.py 的 "dev-only-change-me"，讀過原始碼的人都能
           # 簽出任意使用者的登入 token。寧可在這裡讓部署失敗。
@@ -458,7 +466,12 @@ jobs:
             --from-literal=COHERE_API_KEY="$COHERE_API_KEY" \
             --from-literal=AUTH_JWT_SECRET="$AUTH_JWT_SECRET" \
             --from-literal=TAIGI_API_KEY="$TAIGI_API_KEY" \
+            --from-literal=PGVECTOR_DSN="$PGVECTOR_DSN" \
+            --from-literal=PGVECTOR_SYNC_DSN="$PGVECTOR_SYNC_DSN" \
             -n "$KUBE_NAMESPACE" --dry-run=client -o yaml | kubectl apply -f -
+          if [ -z "$PGVECTOR_DSN" ]; then
+            echo "::warning::GitHub secret PGVECTOR_DSN 未設定，RAG 的向量檢索會失效（只剩 BM25）"
+          fi
 
       # n8n 的憑證與 workflow 存在 PVC 的 SQLite 裡，helm 管不到，過去只能靠人手動
       # 在 UI 或 CLI 補。2026-08-04 起圖片辨識全數失敗就是因為沒人補憑證，而 repo

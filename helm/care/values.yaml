@@ -76,6 +76,11 @@ backend:
     MONGODB_VECTOR_DIM: "3072"
     # Atlas Search（BM25）；與 vector_index 不同的索引
     MONGODB_TEXT_INDEX: "care_text_index"
+    # pgvector：向量檢索改讀 PostgreSQL（MEDDEMO 那座 PG 上的 care_vectors）。
+    # 內文與 BM25 仍在 Atlas——PG 沒有 lucene.cjk 的等價中文分詞。
+    # 連線字串（含密碼）在 Secret 的 PGVECTOR_DSN，不放這裡。
+    PGVECTOR_TABLE: "health_articles_chunks"
+    PGVECTOR_VECTOR_COLUMN: "embedding_half"
     # 使用者上傳文件暫存（與官方 KB 分離；Atlas 需有對應 Vector Search index）
     MONGODB_USER_DOCS_COLLECTION: "user_document_chunks"
     MONGODB_USER_DOCS_VECTOR_INDEX: "user_document_chunks_vector"
@@ -114,6 +119,29 @@ backend:
 # 那個時段就永久錯過。預設時段是 08:00 / 12:00 / 18:00 / 21:30，避開這四個
 # 時間點前後各十分鐘再執行 helm upgrade。之後的一般部署沒有這個問題——
 # 那時 backend 已經是 api，不再參與排程。
+# 向量同步：把 ETL 寫進 Atlas 的 embedding 搬到 pgvector 再清掉。
+# 存在的理由與退役條件見 templates/vector-sync-cronjob.yaml 的註解。
+vectorSync:
+  name: care-vector-sync
+  enabled: true
+  # 每 6 小時。ETL 每天約寫 1,000 筆（42 MB），Atlas 免費層只剩約 460 MB
+  # 餘裕，縮短窗口是為了讓單次同步失敗不必等到隔天才補。
+  schedule: "0 */6 * * *"
+  resources:
+    # 這個 Job 刻意**不** import app.main——scheduler 那 393 MiB 的藥證庫與
+    # n-gram 索引是模組層級載入的死重，搬向量完全用不到。腳本只 import
+    # motor 與 asyncpg，加上單批 200 筆向量約 8.4 MiB（3072 維 × 42 KB）。
+    #
+    # 這組數字是估的，不是實測（上線後應以 kubectl top pod 的峰值校正）。
+    # limits 取 512Mi 是留給 Python 直譯器與 motor 連線池的安全邊際——
+    # 這個 Job 失敗的代價是 Atlas 多撐 6 小時，不值得為了省記憶體冒 OOM 的險。
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
 scheduler:
   name: care-scheduler
   enabled: true

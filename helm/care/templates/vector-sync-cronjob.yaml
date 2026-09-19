@@ -1,0 +1,54 @@
+{{- if .Values.vectorSync.enabled }}
+# 把 Atlas 上新寫入的向量搬進 pgvector，再從 Atlas 清掉。
+#
+# 為什麼需要：2026-09-19 RAG 的向量從 Atlas 搬到 PostgreSQL（3072 維向量一筆
+# 42 KB，把免費層 512 MB 撐爆、寫入被鎖、後端 ensure_indexes() 失敗、新版 pod
+# 起不來）。但 CARE-data 的 ETL 跑在 GitHub Actions 上，而 PG 的 Service 是
+# ClusterIP、叢集外連不到，所以 ETL 仍然把 embedding 寫進 Atlas。這個 CronJob
+# 在叢集內補上那一段，ETL 因此一行都不用改。
+#
+# 這是過渡方案。真正收乾淨的做法是把 ETL 本身搬進叢集直接寫 PG，屆時這個
+# CronJob 可以退役。
+#
+# 排程：ETL 每天台北 06:30 前後跑完（cicd 之外由 CARE-data 的 GitHub Actions
+# 觸發）。這裡每 6 小時跑一次而不是每天一次，是為了縮短 Atlas 的膨脹窗口——
+# 每天 1,000 筆約 42 MB，萬一某次同步失敗，6 小時的間隔讓下一次很快補上，
+# 不必等到隔天。
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ .Values.vectorSync.name }}
+  namespace: {{ include "care.namespace" . }}
+  labels:
+    {{- include "care.labels" . | nindent 4 }}
+spec:
+  schedule: {{ .Values.vectorSync.schedule | quote }}
+  timeZone: "Asia/Taipei"
+  # 搬到一半被砍會讓「PG 已寫入、Atlas 未清除」——那是安全的失敗方向（下次
+  # 重跑會覆蓋同一批 id，ON CONFLICT DO UPDATE 是冪等的），所以不必 Replace。
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  # 節點忙碌時晚跑沒關係，但不要累積一堆待跑的 Job。
+  startingDeadlineSeconds: 600
+  jobTemplate:
+    spec:
+      # 失敗重試兩次就放棄，等下一個 6 小時。腳本本身對「PG 寫入失敗就不清
+      # Atlas」已經是安全的，重試只是為了網路抖動這類暫時性問題。
+      backoffLimit: 2
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: vector-sync
+              image: "{{ .Values.backend.image.repository }}:{{ .Values.backend.image.tag }}"
+              imagePullPolicy: {{ .Values.backend.image.pullPolicy }}
+              command: ["python", "scripts/sync_vectors_to_pg.py"]
+              envFrom:
+                - configMapRef:
+                    name: care-backend-config
+                - secretRef:
+                    name: {{ .Values.secret.name }}
+              resources:
+                {{- toYaml .Values.vectorSync.resources | nindent 16 }}
+{{- end }}

@@ -16,6 +16,10 @@ data:
   MONGODB_TEXT_FIELD: {{ .Values.backend.config.MONGODB_TEXT_FIELD | quote }}
   MONGODB_VECTOR_DIM: {{ .Values.backend.config.MONGODB_VECTOR_DIM | quote }}
   MONGODB_TEXT_INDEX: {{ .Values.backend.config.MONGODB_TEXT_INDEX | quote }}
+  # pgvector：RAG 的向量檢索（2026-09-19 從 Atlas 搬出，因 3072 維向量撐爆
+  # 免費層 512 MB 導致寫入被鎖）。連線字串含密碼，走 Secret 的 PGVECTOR_DSN。
+  PGVECTOR_TABLE: {{ .Values.backend.config.PGVECTOR_TABLE | quote }}
+  PGVECTOR_VECTOR_COLUMN: {{ .Values.backend.config.PGVECTOR_VECTOR_COLUMN | quote }}
   MONGODB_USER_DOCS_COLLECTION: {{ .Values.backend.config.MONGODB_USER_DOCS_COLLECTION | quote }}
   MONGODB_USER_DOCS_VECTOR_INDEX: {{ .Values.backend.config.MONGODB_USER_DOCS_VECTOR_INDEX | quote }}
   USER_DOCS_TTL_SECONDS: {{ .Values.backend.config.USER_DOCS_TTL_SECONDS | quote }}
