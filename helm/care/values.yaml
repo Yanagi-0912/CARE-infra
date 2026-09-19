@@ -41,13 +41,24 @@ backend:
     # 該行程 anon-rss 262Mi），加上 uvicorn 的 502Mi 超過上限，整個容器 OOMKilled，
     # 外部 /health 斷約 1 分鐘並觸發 uptime 告警。1536Mi 約為閒置值三倍，容得下再載
     # 一份完整 app 加請求尖峰；當時節點 15.6 GB 只用 4.2 GB。
+    #
+    # 2026-09-19 再調（CARE 0d70dc7，四個本地分類器加上句向量特徵）：
+    #   記憶體 —— 那個 int8 ONNX 編碼器與四份權重表常駐約 +600Mi（本機量，
+    #   Linux 會有出入）。閒置從約 500Mi 變成約 1.1Gi，1536Mi 只剩三成餘裕，
+    #   再被 exec 或請求尖峰一撞就是 9/17 那次 OOMKilled 重演。requests 改
+    #   1Gi 反映真實閒置值（K8s 排程看的是 requests，設得比實際低會讓節點被
+    #   超賣），limits 2560Mi 維持約兩倍餘裕。節點 16GB，目前全部 pod 的
+    #   limits 加總仍在一半以下。
+    #   CPU —— 編碼是純 CPU 工作。500m 是 CFS 配額（半顆核心），而編碼器
+    #   刻意只開 1 執行緒（多開在配額下只會互相等待）。1000m 讓單次編碼不被
+    #   切碎；**上線後要在 VM 實測一次**，本機 3.96ms 不能直接套用。
     requests:
       cpu: 100m
-      memory: 512Mi
+      memory: 1Gi
       ephemeral-storage: 512Mi
     limits:
-      cpu: 500m
-      memory: 1536Mi
+      cpu: 1000m
+      memory: 2560Mi
       ephemeral-storage: 1Gi
   config:
     # 與 CARE app/core/config.py 的預設一致。4afc226 曾改過一次，隨 ASR 一起被
@@ -135,17 +146,20 @@ scheduler:
     # 只剩一成餘裕；CARE 1600cca 多載入 PyAV 後啟動就 OOMKilled。requests 改
     # 512Mi、limits 改 768Mi，與 backend 相同。
     # 2026-09-17 limits 隨 backend 調到 1536Mi（原因見 backend），同一個映像一樣會被 exec 撐爆。
+    # 2026-09-19 隨 backend 調到 1Gi／2560Mi 與 1000m（原因見 backend）：同一個
+    # 映像、同一份 app.dependencies，句向量編碼器一樣會被載進來。
     requests:
       cpu: 100m
-      memory: 512Mi
+      memory: 1Gi
       ephemeral-storage: 256Mi
     limits:
       # CPU 與 backend 同級而非更低：啟動時建 n-gram 索引是 CPU 密集的，
       # cpu limit 是 CFS quota，設太低會等比例拉長啟動時間
       #   500m → 約 4.5s   200m → 約 11s
       # 而 probe 的預算有限（見 scheduler-deployment.yaml 的 startupProbe）。
-      cpu: 500m
-      memory: 1536Mi
+      # 載入 ONNX 編碼器另外要約 0.8 秒，同樣吃這個配額。
+      cpu: 1000m
+      memory: 2560Mi
       ephemeral-storage: 512Mi
 
 # 語音合成（care-tts）：合成 LINE 語音回覆、把 mp3 存在 PVC、提供 /tts 給 LINE 下載。
